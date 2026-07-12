@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 import logging
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import matplotlib
@@ -115,7 +115,6 @@ def render_graph(
         ax.set_xlim(timestamps[0], timestamps[-1])
     else:
         # Single data point — add 30s padding on each side
-        from datetime import timedelta
         pad = timedelta(seconds=30)
         ax.set_xlim(timestamps[0] - pad, timestamps[-1] + pad)
     ax.set_ylim(0, max_hr * 1.15)
