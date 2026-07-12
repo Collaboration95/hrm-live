@@ -1,4 +1,8 @@
-"""Tests for session management and CSV export."""
+"""Tests for session management and CSV export.
+
+All CSV I/O is isolated to a temporary directory via the ``tmp_session_dir``
+fixture so that tests never write to the real home directory.
+"""
 
 import csv
 import os
@@ -15,14 +19,29 @@ from session import start_session, record_sample, stop_session, SESSION_DIR
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def state() -> AppState:
     s = AppState()
-    s.config = {"max_hr": 190, "zones": {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}}
+    s.config = {
+        "max_hr": 190,
+        "zones": {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88},
+    }
     return s
 
 
+@pytest.fixture
+def tmp_session_dir() -> Path:
+    """Provide a temporary session directory and patch SESSION_DIR."""
+    with tempfile.TemporaryDirectory() as d:
+        target = Path(d) / "sessions"
+        target.mkdir(parents=True, exist_ok=True)
+        with patch("session.SESSION_DIR", target):
+            yield target
+
+
 # ── Start ───────────────────────────────────────────────────────────────
+
 
 def test_start_session_resets(state: AppState) -> None:
     # Set some previous session data
@@ -44,9 +63,11 @@ def test_start_session_resets(state: AppState) -> None:
     assert state.session_count == 0
     assert state.zone_times == {"Z1": 0, "Z2": 0, "Z3": 0, "Z4": 0}
     assert state.last_csv_path is None
+    assert state.last_csv_error is None
 
 
 # ── Record ──────────────────────────────────────────────────────────────
+
 
 def test_record_noop_when_inactive(state: AppState) -> None:
     state.session_active = False
@@ -101,6 +122,7 @@ def test_record_zone_times(state: AppState) -> None:
 
 # ── Stop ────────────────────────────────────────────────────────────────
 
+
 def test_stop_no_active_session(state: AppState) -> None:
     result = stop_session(state)
     assert result is None
@@ -113,7 +135,7 @@ def test_stop_no_samples(state: AppState) -> None:
     assert state.session_active is False
 
 
-def test_stop_and_csv_export(state: AppState) -> None:
+def test_stop_and_csv_export(state: AppState, tmp_session_dir: Path) -> None:
     start_session(state)
     record_sample(state, datetime.now(timezone.utc), 130)
     record_sample(state, datetime.now(timezone.utc), 150)
@@ -124,10 +146,12 @@ def test_stop_and_csv_export(state: AppState) -> None:
     assert result.endswith(".csv")
     assert state.session_active is False
     assert state.last_csv_path is not None
+    assert state.last_csv_error is None
 
     # Verify CSV content
     path = Path(result)
     assert path.exists()
+    assert path.parent == tmp_session_dir
     with open(path, "r") as f:
         reader = csv.reader(f)
         rows = list(reader)
@@ -142,7 +166,8 @@ def test_stop_and_csv_export(state: AppState) -> None:
     assert rows[3][2] == "Z4"
 
 
-def test_stop_stats_remain_after_stop(state: AppState) -> None:
+def test_stop_stats_remain_after_stop(state: AppState,
+                                      tmp_session_dir: Path) -> None:
     start_session(state)
     record_sample(state, datetime.now(timezone.utc), 130)
     record_sample(state, datetime.now(timezone.utc), 150)
@@ -155,7 +180,8 @@ def test_stop_stats_remain_after_stop(state: AppState) -> None:
     assert state.session_count == 2
 
 
-def test_new_session_clears_previous_stats(state: AppState) -> None:
+def test_new_session_clears_previous_stats(state: AppState,
+                                           tmp_session_dir: Path) -> None:
     start_session(state)
     record_sample(state, datetime.now(timezone.utc), 130)
     stop_session(state)
@@ -169,7 +195,9 @@ def test_new_session_clears_previous_stats(state: AppState) -> None:
 
 # ── CSV collision ───────────────────────────────────────────────────────
 
-def test_csv_filename_collision(state: AppState) -> None:
+
+def test_csv_filename_collision(state: AppState,
+                                tmp_session_dir: Path) -> None:
     """Two sessions stopped in the same minute get different filenames."""
     start_session(state)
     record_sample(state, datetime.now(timezone.utc), 130)
@@ -182,13 +210,15 @@ def test_csv_filename_collision(state: AppState) -> None:
     assert p1 != p2
     assert p1.exists()
     assert p2.exists()
+    assert p1.parent == tmp_session_dir
+    assert p2.parent == tmp_session_dir
 
 
 # ── Session directory ───────────────────────────────────────────────────
 
+
 def test_session_dir_created(state: AppState) -> None:
     """Session directory is created on first stop."""
-    # Use a temp directory for testing
     with tempfile.TemporaryDirectory() as d:
         with patch("session.SESSION_DIR", Path(d) / "sessions"):
             start_session(state)
@@ -196,3 +226,44 @@ def test_session_dir_created(state: AppState) -> None:
             path = stop_session(state)
             assert path is not None
             assert Path(path).parent.exists()
+
+
+# ── CSV write failure ───────────────────────────────────────────────────
+
+
+def test_csv_write_failure_handled(state: AppState) -> None:
+    """When CSV cannot be written, error is recorded and None returned."""
+
+    # Patch open to raise PermissionError
+    original_open = open
+
+    def failing_open(*args, **kwargs):
+        raise PermissionError("Permission denied")
+
+    start_session(state)
+    record_sample(state, datetime.now(timezone.utc), 130)
+
+    with patch("builtins.open", failing_open):
+        result = stop_session(state)
+
+    assert result is None
+    assert state.last_csv_path is None
+    assert state.last_csv_error is not None
+    assert "Permission denied" in state.last_csv_error
+
+
+def test_csv_mkdir_failure_handled(state: AppState) -> None:
+    """When SESSION_DIR cannot be created, error is recorded."""
+
+    with tempfile.TemporaryDirectory() as d:
+        # Create a file at the path where the directory would be
+        dead_path = Path(d) / "sessions"
+        dead_path.write_text("not a directory")
+        with patch("session.SESSION_DIR", dead_path):
+            start_session(state)
+            record_sample(state, datetime.now(timezone.utc), 130)
+            result = stop_session(state)
+
+    assert result is None
+    assert state.last_csv_path is None
+    assert state.last_csv_error is not None

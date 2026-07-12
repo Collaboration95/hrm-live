@@ -38,6 +38,7 @@ def start_session(state: AppState) -> None:
     state.session_count = 0
     state.zone_times = {"Z1": 0, "Z2": 0, "Z3": 0, "Z4": 0}
     state.last_csv_path = None
+    state.last_csv_error = None
     log.info("Session started at %s", state.session_start.isoformat())
 
 
@@ -93,6 +94,8 @@ def stop_session(state: AppState, max_hr: int = 190,
     active or no samples were collected.
 
     Stats remain visible in state until the next ``start_session()``.
+    If CSV write fails, the error is recorded in ``state.last_csv_error``
+    and ``None`` is returned.
     """
     if not state.session_active:
         return None
@@ -106,12 +109,20 @@ def stop_session(state: AppState, max_hr: int = 190,
 
     if state.session_count == 0:
         state.last_csv_path = None
+        state.last_csv_error = None
         return None
 
-    # Write CSV
-    csv_path = _write_csv(state, max_hr, zones or {})
-    state.last_csv_path = str(csv_path)
-    return str(csv_path)
+    # Write CSV (with error handling)
+    try:
+        csv_path = _write_csv(state, max_hr, zones or {})
+        state.last_csv_path = str(csv_path)
+        state.last_csv_error = None
+        return str(csv_path)
+    except (OSError, PermissionError) as exc:
+        log.error("Failed to write session CSV: %s", exc)
+        state.last_csv_path = None
+        state.last_csv_error = str(exc)
+        return None
 
 
 # ── CSV export ───────────────────────────────────────────────────────────
@@ -123,6 +134,8 @@ def _write_csv(state: AppState, max_hr: int,
 
     Filename collision avoidance: if two sessions stop in the same
     minute, a counter suffix is appended.
+
+    Raises ``OSError`` on write failure.
     """
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
 

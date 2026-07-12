@@ -46,11 +46,20 @@ it will show a grey disconnected indicator.
 
 ## Running Tests
 
+Make sure the virtual environment is active first:
+
 ```bash
+source .venv/bin/activate
 pytest -v
 ```
 
-Or with coverage:
+Or run directly:
+
+```bash
+.venv/bin/python -m pytest -v
+```
+
+With coverage:
 
 ```bash
 pip install pytest-cov

@@ -56,6 +56,7 @@ OPTIONS = {
     "iconfile": None,  # Use a default icon; can be set later
     "emulate_shell_environment": True,
     "resources": [],
+    "entitlements": "hrm-live.entitlements",
 }
 
 setup(

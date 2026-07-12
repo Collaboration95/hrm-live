@@ -7,30 +7,29 @@ Reads from ``AppState`` and delegates session actions to ``session.py``.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
+import objc
 from AppKit import (
     NSImage,
     NSImageView,
     NSView,
-    NSStackView,
     NSTextField,
     NSFont,
     NSColor,
     NSPopover,
+    NSPopoverBehaviorTransient,
     NSViewController,
     NSButton,
-    NSBezelStyle,
-    NSBox,
-    NSVisualEffectView,
-    NSLayoutAttributeTop,
-    NSLayoutAttributeBottom,
-    NSLayoutAttributeLeading,
-    NSLayoutAttributeTrailing,
-    NSLayoutConstraint,
-    NSLayoutRelationEqual,
+    NSBezelStyleRounded,
+    NSBezierPath,
+    NSGraphicsContext,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
 )
+from Foundation import NSString
 
 from state import AppState
 from zones import get_zone, zone_color, zone_label, ZONE_ORDER
@@ -40,6 +39,8 @@ import session as sess_mod
 log = logging.getLogger(__name__)
 
 POPOVER_WIDTH = 280
+GAUGE_SIZE = 110
+GAUGE_LINE_WIDTH = 14
 
 
 class HRMPopover:
@@ -67,7 +68,7 @@ class HRMPopover:
         """Create and show the popover."""
         if self._popover is None:
             self._popover = NSPopover.alloc().init()
-            self._popover.setBehavior_(NSPopover.NSPopoverBehaviorTransient)
+            self._popover.setBehavior_(NSPopoverBehaviorTransient)
 
         vc = NSViewController.alloc().init()
         vc.setView_(self._build_view())
@@ -105,29 +106,29 @@ class HRMPopover:
             NSColor.colorWithCalibratedWhite_alpha_(0.12, 1.0).CGColor()
         )
 
-        # Labels for each section (manually positioned for simplicity)
         y_offset = 470
 
-        # ── Hero BPM ──────────────────────────────────────────────
-        bpm = s.latest_bpm if s.connected and s.latest_bpm is not None else None
+        # ── Resolve config once ────────────────────────────────────
         cfg = s.config or {}
         max_hr = cfg.get("max_hr", 190)
         zones_cfg = cfg.get("zones", {})
         colors_cfg = cfg.get("zone_colors", {})
 
+        zone_bounds = {
+            "z1_max": zones_cfg.get("z1_max", 0.60),
+            "z2_max": zones_cfg.get("z2_max", 0.75),
+            "z3_max": zones_cfg.get("z3_max", 0.88),
+        }
+
+        bpm = s.latest_bpm if s.connected and s.latest_bpm is not None else None
         if bpm is not None:
-            zone_bounds = {
-                "z1_max": zones_cfg.get("z1_max", 0.60),
-                "z2_max": zones_cfg.get("z2_max", 0.75),
-                "z3_max": zones_cfg.get("z3_max", 0.88),
-            }
             current_zone = get_zone(bpm, max_hr, zone_bounds)
         else:
             current_zone = "Z1"
 
         z_col = _ns_color(zone_color(current_zone, colors_cfg))
 
-        # Big BPM
+        # ── Hero BPM ──────────────────────────────────────────────
         bpm_str = f"{bpm}" if bpm is not None else "---"
         lbl = _make_label(bpm_str, NSFont.boldSystemFontOfSize_(36),
                           z_col, (20, y_offset - 10, 180, 44))
@@ -140,7 +141,16 @@ class HRMPopover:
                            z_col, (20, y_offset - 48, 200, 24))
         root.addSubview_(lbl2)
 
-        y_offset -= 80
+        # ── Donut gauge ───────────────────────────────────────────
+        gauge_frame = ((POPOVER_WIDTH - GAUGE_SIZE - 10, y_offset - GAUGE_SIZE - 10),
+                       (GAUGE_SIZE, GAUGE_SIZE))
+        gauge_view = DonutGaugeView.alloc().initWithFrame_(gauge_frame)
+        gauge_view.setBpm_zone_zoneBounds_maxHr_colorsCfg_(
+            bpm, current_zone, zone_bounds, max_hr, colors_cfg
+        )
+        root.addSubview_(gauge_view)
+
+        y_offset -= GAUGE_SIZE + 30
 
         # ── Graph ──────────────────────────────────────────────────
         if s.ring_buffer:
@@ -162,6 +172,16 @@ class HRMPopover:
                     root.addSubview_(img_view)
                     self._latest_graph_bytes = png_bytes
                     y_offset -= 180
+        else:
+            # Empty graph placeholder
+            placeholder = _make_label(
+                "No HR data yet — waiting for connection...",
+                NSFont.systemFontOfSize_(11),
+                NSColor.grayColor(),
+                (20, y_offset - 20, POPOVER_WIDTH - 40, 40),
+            )
+            root.addSubview_(placeholder)
+            y_offset -= 40
 
         y_offset -= 10
 
@@ -216,14 +236,12 @@ class HRMPopover:
         # Session toggle
         if s.session_active:
             btn_title = "■ Stop Session"
-            btn_action = "stop_session:"
         else:
             btn_title = "▶ Start Session"
-            btn_action = "start_session:"
 
         btn = NSButton.alloc().initWithFrame_(((10, y_offset - 36), (130, 32)))
         btn.setTitle_(btn_title)
-        btn.setBezelStyle_(NSBezelStyle.NSBezelStyleRounded)
+        btn.setBezelStyle_(NSBezelStyleRounded)
         btn.setTarget_(self)
         btn.setAction_(
             "start_session:" if not s.session_active else "stop_session:"
@@ -233,7 +251,7 @@ class HRMPopover:
         # Settings button
         settings_btn = NSButton.alloc().initWithFrame_(((150, y_offset - 36), (100, 32)))
         settings_btn.setTitle_("⚙ Settings")
-        settings_btn.setBezelStyle_(NSBezelStyle.NSBezelStyleRounded)
+        settings_btn.setBezelStyle_(NSBezelStyleRounded)
         settings_btn.setTarget_(self)
         settings_btn.setAction_("open_settings:")
         root.addSubview_(settings_btn)
@@ -259,6 +277,120 @@ class HRMPopover:
         """Open the settings window."""
         if self.on_settings:
             self.on_settings()
+
+
+# ── Donut Gauge View ────────────────────────────────────────────────────
+
+# The PyObjC selector name must match the number of colons in the selector.
+# setBpm:zone:zoneBounds:maxHr:colorsCfg: — 5 colons → 5 arguments (plus self)
+# The trailing _ in the Python name maps to the colon in the selector.
+
+
+class DonutGaugeView(NSView):
+    """An NSView subclass that draws a donut/arc gauge showing HR zone.
+
+    Uses NSBezierPath for reliable arc drawing in PyObjC.
+    """
+
+    def initWithFrame_(self, frame: tuple) -> "DonutGaugeView":
+        self = objc.super(DonutGaugeView, self).initWithFrame_(frame)
+        if self:
+            self._bpm = None
+            self._zone = "Z1"
+            self._zone_bounds = {}
+            self._max_hr = 190
+            self._colors_cfg = {}
+        return self
+
+    def setBpm_zone_zoneBounds_maxHr_colorsCfg_(
+        self,
+        bpm: int | None,
+        zone: str,
+        zone_bounds: dict,
+        max_hr: int,
+        colors_cfg: dict,
+    ) -> None:
+        self._bpm = bpm
+        self._zone = zone
+        self._zone_bounds = zone_bounds
+        self._max_hr = max_hr
+        self._colors_cfg = colors_cfg
+        self.setNeedsDisplay_(True)
+
+    def isFlipped(self) -> bool:
+        return False  # Default AppKit coordinate system
+
+    def drawRect_(self, rect: tuple) -> None:
+        """Draw the donut gauge."""
+        ctx = NSGraphicsContext.currentContext()
+        ctx.saveGraphicsState()
+
+        bounds = self.bounds()
+        cx = bounds.size.width / 2
+        cy = bounds.size.height / 2
+        radius = min(cx, cy) - GAUGE_LINE_WIDTH / 2 - 4
+
+        # ---- Background ring ----
+        bg_path = NSBezierPath.bezierPath()
+        bg_path.appendBezierPathWithArcWithCenter_startAngle_endAngle_clockwise_(
+            (cx, cy), radius, 0, 360, False
+        )
+        bg_path.setLineWidth_(GAUGE_LINE_WIDTH)
+        NSColor.darkGrayColor().setStroke()
+        bg_path.stroke()
+
+        # ---- Active arc ----
+        if self._bpm is not None:
+            fraction = min(self._bpm / self._max_hr, 1.0)
+            end_angle = fraction * 360.0  # degrees
+
+            color = _ns_color(zone_color(self._zone, self._colors_cfg))
+            color.setStroke()
+
+            arc_path = NSBezierPath.bezierPath()
+            arc_path.appendBezierPathWithArcWithCenter_startAngle_endAngle_clockwise_(
+                (cx, cy), radius, -90, -90 + end_angle, False
+            )
+            arc_path.setLineWidth_(GAUGE_LINE_WIDTH)
+            arc_path.setLineCapStyle_(2)  # NSSquareLineCapStyle
+            arc_path.stroke()
+
+            # ---- Zone boundary tick marks ----
+            for zone_key in ["z1_max", "z2_max", "z3_max"]:
+                frac = self._zone_bounds.get(zone_key, 0.0)
+                if frac > 0 and frac < 1.0:
+                    angle_deg = frac * 360.0 - 90
+                    tick_inner_r = radius - GAUGE_LINE_WIDTH / 2 - 2
+                    tick_outer_r = radius + GAUGE_LINE_WIDTH / 2 + 2
+                    rad = math.radians(angle_deg)
+                    tick_path = NSBezierPath.bezierPath()
+                    tick_path.moveToPoint_(
+                        (cx + tick_inner_r * math.cos(rad),
+                         cy + tick_inner_r * math.sin(rad))
+                    )
+                    tick_path.lineToPoint_(
+                        (cx + tick_outer_r * math.cos(rad),
+                         cy + tick_outer_r * math.sin(rad))
+                    )
+                    tick_path.setLineWidth_(1.5)
+                    NSColor.grayColor().setStroke()
+                    tick_path.stroke()
+
+        # ---- Center text ----
+        bpm_str = f"{self._bpm}" if self._bpm is not None else "---"
+        font = NSFont.boldSystemFontOfSize_(18)
+        color = _ns_color(zone_color(self._zone, self._colors_cfg))
+        attrs = {
+            NSFontAttributeName: font,
+            NSForegroundColorAttributeName: color,
+        }
+        ns_str = NSString.alloc().initWithString_(bpm_str)
+        size = ns_str.sizeWithAttributes_(attrs)
+        x = cx - size.width / 2
+        y = cy - size.height / 2
+        ns_str.drawAtPoint_withAttributes_((x, y), attrs)
+
+        ctx.restoreGraphicsState()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

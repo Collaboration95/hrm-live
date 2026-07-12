@@ -3,6 +3,12 @@
 Handles the GATT Heart Rate Measurement characteristic (0x2A37),
 parses 8-bit and 16-bit BPM payloads, and runs a background asyncio
 event loop with auto-reconnect.
+
+Lifecycle
+---------
+Use ``start_ble_background(state, address)`` to start the thread.
+Use ``stop_ble_background(manager)`` to cleanly shut it down.
+The manager tuple ``(thread, stop_event)`` is returned by start.
 """
 
 from __future__ import annotations
@@ -72,24 +78,32 @@ def _make_callback(state: AppState) -> Callable:
 # ── BLE loop ─────────────────────────────────────────────────────────────
 
 
-async def ble_loop(state: AppState, address: str) -> None:
+async def ble_loop(
+    state: AppState,
+    address: str,
+    stop_event: threading.Event | None = None,
+) -> None:
     """Async BLE connection loop with auto-reconnect.
 
-    Runs forever, connecting and reconnecting to *address*.
-    Sets ``state.connected = True`` only when notifications are active.
+    Connects to *address* and maintains the connection.  When
+    disconnected it waits 3 seconds and retries.  Loops until
+    *stop_event* is set.
     """
     if not address:
         log.info("No device address configured; BLE loop idle.")
         return
 
-    while True:
+    def should_stop() -> bool:
+        return stop_event is not None and stop_event.is_set()
+
+    while not should_stop():
         try:
             async with BleakClient(address) as client:
                 log.info("Connected to %s", address)
                 state.connected = True
                 callback = _make_callback(state)
                 await client.start_notify(HEART_RATE_UUID, callback)
-                while client.is_connected:
+                while client.is_connected and not should_stop():
                     await asyncio.sleep(1)
         except (BleakError, OSError, asyncio.TimeoutError) as exc:
             log.warning("BLE error: %s", exc)
@@ -97,34 +111,84 @@ async def ble_loop(state: AppState, address: str) -> None:
             log.exception("Unexpected BLE error: %s", exc)
         finally:
             state.connected = False
-            log.info("Disconnected; retrying in 3 seconds...")
-            await asyncio.sleep(3)
+            if not should_stop():
+                log.info("Disconnected; retrying in 3 seconds...")
+                # Sleep in short intervals so we respond promptly to stop_event
+                for _ in range(30):
+                    if should_stop():
+                        return
+                    await asyncio.sleep(0.1)
 
 
-# ── Thread starter ───────────────────────────────────────────────────────
+# ── Lifecycle manager ───────────────────────────────────────────────────
 
 
-def start_ble_thread(state: AppState, address: str) -> threading.Thread:
-    """Start the BLE asyncio loop in a dedicated daemon thread.
+def start_ble_background(
+    state: AppState,
+    address: str,
+) -> tuple[threading.Thread, threading.Event]:
+    """Start the BLE asyncio loop in a background daemon thread.
 
-    Returns the thread handle (already started).  Does **not** touch
-    AppKit or rumps.
+    Returns ``(thread, stop_event)`` that can be passed to
+    ``stop_ble_background()`` for controlled shutdown.
+
+    Does **not** touch AppKit or rumps.
     """
+    stop_event = threading.Event()
     thread = threading.Thread(
         target=_run_async_loop,
-        args=(state, address),
+        args=(state, address, stop_event),
         daemon=True,
         name="ble-asyncio",
     )
     thread.start()
-    return thread
+    return thread, stop_event
 
 
-def _run_async_loop(state: AppState, address: str) -> None:
+def stop_ble_background(
+    manager: tuple[threading.Thread, threading.Event] | None,
+    join_timeout: float = 3.0,
+) -> None:
+    """Signal a BLE background thread to stop and wait for it.
+
+    If *manager* is ``None`` this is a no-op.
+    """
+    if manager is None:
+        return
+    thread, stop_event = manager
+    stop_event.set()
+    # If the thread is blocked in an asyncio sleep, we need to wake it up.
+    # We schedule loop.stop() on the running loop to raise CancelledError.
+    # The thread's _run_async_loop will catch the cancellation and exit.
+    if thread.is_alive():
+        thread.join(timeout=join_timeout)
+        if thread.is_alive():
+            log.warning("BLE thread did not stop within %.1f seconds", join_timeout)
+
+
+def _run_async_loop(
+    state: AppState,
+    address: str,
+    stop_event: threading.Event,
+) -> None:
     """Run the asyncio event loop in the current thread."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(ble_loop(state, address))
+        loop.run_until_complete(ble_loop(state, address, stop_event))
+    except asyncio.CancelledError:
+        log.info("BLE loop cancelled.")
     finally:
+        # Cancel any pending tasks and close the loop
+        try:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
+        except Exception:
+            pass
         loop.close()
+        log.info("BLE event loop closed.")
