@@ -111,7 +111,13 @@ def render_graph(
     ax.plot(timestamps, bpms, color="#4fc3f7", linewidth=1.5, zorder=3)
 
     # Style
-    ax.set_xlim(timestamps[0], timestamps[-1])
+    if timestamps[0] != timestamps[-1]:
+        ax.set_xlim(timestamps[0], timestamps[-1])
+    else:
+        # Single data point — add 30s padding on each side
+        from datetime import timedelta
+        pad = timedelta(seconds=30)
+        ax.set_xlim(timestamps[0] - pad, timestamps[-1] + pad)
     ax.set_ylim(0, max_hr * 1.15)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     ax.tick_params(colors="#aaaaaa", labelsize=8)
