@@ -1,2 +1,33 @@
-docs/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+*.so
+
+# Virtual environments
 .env/
+.env.*
+venv/
+.venv/
+virtualenv/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+*.app
+
+# Session test data (generated)
+sessions/
+
+# Config test data
+*.corrupt
