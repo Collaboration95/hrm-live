@@ -18,6 +18,7 @@ def test_default_initialization() -> None:
     assert s.session_count == 0
     assert s.zone_times == {"Z1": 0, "Z2": 0, "Z3": 0, "Z4": 0}
     assert s.last_csv_path is None
+    assert s.last_csv_error is None
     assert s.config is None
 
 

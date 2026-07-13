@@ -53,5 +53,8 @@ class AppState:
     # Last CSV path written (None if never saved)
     last_csv_path: str | None = None
 
+    # Last CSV export error, retained for the UI after a failed save
+    last_csv_error: str | None = None
+
     # Current config snapshot (updated when settings are saved)
     config: dict | None = None

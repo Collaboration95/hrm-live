@@ -67,14 +67,15 @@ Status values: `not-started`, `in-progress`, `partial`, `complete`, `blocked`, `
   - [x] Malformed payload tests pass under venv
   - [x] BLE loop mock tests pass (with AsyncMock)
   - [x] BLE thread lifecycle tests pass (start + stop via stop_event)
+  - [x] BLE shutdown cancellation test passes
   - [x] `stop_ble_background(None)` is a no-op
 - known_gaps: None
 - evaluator_notes:
-  - `start_ble_background()` returns `(thread, stop_event)` tuple.
-  - `stop_ble_background(manager)` sets stop_event and joins the thread.
+  - `start_ble_background()` returns a `BLEManager` with thread, stop_event, ready_event, loop, and task handles.
+  - `stop_ble_background(manager)` sets stop_event, cancels the BLE task on its owning asyncio loop, and joins the thread.
   - BLE loop checks stop_event every 100ms during the 3s reconnect delay.
-  - `app.py` retains the manager and stops BLE on exit via `atexit`.
-  - **Crash risk eliminated** — CoreBluetooth callbacks are cleaned up before Python finalization.
+  - `app.py` retains the manager and stops BLE on exit via `atexit`; the Quit menu action also stops BLE before quitting rumps.
+  - The previous CoreBluetooth finalization crash path is addressed by explicit task cancellation and thread join.
 
 ## Phase 3 - Session Management and CSV Export
 
@@ -146,6 +147,7 @@ Status values: `not-started`, `in-progress`, `partial`, `complete`, `blocked`, `
   - [x] **Empty graph placeholder** ("No HR data yet — waiting for connection...")
 - acceptance_checks:
   - [x] Import tests pass (popover imports without error)
+  - [x] Headless popover build avoids AppKit aborts when no `NSApplication` is registered
   - [x] Graph tests pass (7 tests, including single-point and empty buffer)
   - [x] Empty ring buffer shows placeholder text (no crash)
 - known_gaps:
@@ -168,6 +170,7 @@ Status values: `not-started`, `in-progress`, `partial`, `complete`, `blocked`, `
   - [x] Saved settings reload on restart (persisted to ~/.config/hrm/config.json)
 - acceptance_checks:
   - [x] Import tests pass (settings imports without error)
+  - [x] Headless settings panel fails safely with `RuntimeError` when no `NSApplication` is registered
   - [x] Config save/load cycle verified in config tests
 - known_gaps:
   - Color controls are hex text fields, not native NSColorWell. Acceptable for v1, documented deviation.
@@ -184,19 +187,22 @@ Status values: `not-started`, `in-progress`, `partial`, `complete`, `blocked`, `
   - [x] `LSUIElement` set to True (no dock icon)
   - [x] Matplotlib Agg backend included
   - [x] **`.entitlements` file created** (`hrm-live.entitlements` with Bluetooth device permission)
-  - [x] **Entitlements referenced in setup.py** (`entitlements` key)
+  - [x] **Entitlements applied in setup.py** (post-build ad-hoc `codesign` step)
   - [x] Dev run path remains separate (`python app.py`)
 - acceptance_checks:
-  - [ ] App bundle build (`python setup.py py2app`) — needs clean venv, not yet tested
-  - [ ] App bundle launch — not yet tested
+  - [x] App bundle build (`.venv/bin/python setup.py py2app`) completed successfully
+  - [x] Built bundle entitlements verified with `codesign -d --entitlements :-`
+  - [x] Built bundle Info.plist verified for Bluetooth usage strings and `LSUIElement`
+  - [ ] App bundle launch with real macOS UI — not performed in this audit pass
 - known_gaps:
-  - Build has not been executed in a clean environment. The py2app configuration is syntactically correct but may need font cache seeding for matplotlib inside the .app bundle.
+  - Built bundle launch and real Bluetooth permission prompt were not exercised in this audit pass.
+  - Packaging excludes Pillow and limits Matplotlib to the Agg backend to avoid bundling optional image libraries that are not needed by the app.
 
 ## Phase 8 - End-to-End Validation and V1 Hardening
 
 - status: `complete`
 - requirements_completed:
-  - [x] Automated tests pass (93 tests, all passing)
+  - [x] Automated tests pass (96 tests, all passing)
   - [x] Dev app runs (verified)
   - [x] Mock BLE workflow verified (via pytest with AsyncMock)
   - [x] CSV export tested in temp directory (format matches spec)
@@ -214,11 +220,11 @@ Status values: `not-started`, `in-progress`, `partial`, `complete`, `blocked`, `
 ## Final Evaluation Summary
 
 - overall_status: `complete`
-- evaluated_at: `2026-07-12`
+- evaluated_at: `2026-07-13`
 - evaluator: `Implementation Agent (automated)`
 - spec_compliance: `full` — all in-scope v1 requirements met
-- automated_tests: **93 tests, all passing**
-- manual_tests: `Dev app launches, popover/settings code compiles`
+- automated_tests: **96 tests, all passing**
+- manual_tests: `Dev app launches, popover/settings code compiles, py2app bundle builds and is entitlement-checked`
 - hardware_tests: `deferred` — no HRM strap available at build time
 - approved_deviations:
   - Zone colors in settings are hex text fields rather than native NSColorWell (acceptable for v1)

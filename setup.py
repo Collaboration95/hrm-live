@@ -7,10 +7,15 @@ Build command:
 The .app bundle will be created in dist/HRM Live.app.
 """
 
+import subprocess
+from pathlib import Path
+
+from py2app.build_app import py2app
 from setuptools import setup
 
 APP = ["app.py"]
 APP_NAME = "HRM Live"
+ENTITLEMENTS = Path("hrm-live.entitlements")
 
 DATA_FILES = []
 
@@ -42,7 +47,6 @@ OPTIONS = {
     "includes": [
         "AppKit",
         "CoreBluetooth",
-        "Quartz",
         "Foundation",
         "matplotlib.backends.backend_agg",
     ],
@@ -51,25 +55,48 @@ OPTIONS = {
         "test",
         "tests",
         "tkinter",
+        "PIL",
     ],
+    "matplotlib_backends": ["agg"],
     "site_packages": True,
     "iconfile": None,  # Use a default icon; can be set later
     "emulate_shell_environment": True,
     "resources": [],
-    "entitlements": "hrm-live.entitlements",
 }
+
+
+class Py2AppWithEntitlements(py2app):
+    """Build the app and ad-hoc sign it with Bluetooth entitlements."""
+
+    def finalize_options(self):
+        self.distribution.install_requires = None
+        super().finalize_options()
+
+    def run(self):
+        super().run()
+        app_path = Path(self.dist_dir) / f"{APP_NAME}.app"
+        if not app_path.exists():
+            raise RuntimeError(f"Expected app bundle was not created: {app_path}")
+        if not ENTITLEMENTS.exists():
+            raise RuntimeError(f"Missing entitlements file: {ENTITLEMENTS}")
+        subprocess.run(
+            [
+                "codesign",
+                "--force",
+                "--deep",
+                "--sign",
+                "-",
+                "--entitlements",
+                str(ENTITLEMENTS),
+                str(app_path),
+            ],
+            check=True,
+        )
 
 setup(
     name=APP_NAME,
     app=APP,
     data_files=DATA_FILES,
     options={"py2app": OPTIONS},
-    setup_requires=["py2app"],
-    install_requires=[
-        "rumps>=0.4.0",
-        "bleak>=0.21.0",
-        "matplotlib>=3.8.0",
-        "pyobjc-core",
-        "pyobjc-framework-Cocoa",
-    ],
+    cmdclass={"py2app": Py2AppWithEntitlements},
 )

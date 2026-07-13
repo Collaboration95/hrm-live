@@ -163,12 +163,11 @@ def test_start_ble_background_no_address() -> None:
     state = AppState()
     mgr = start_ble_background(state, "")
     assert mgr is not None
-    thread, stop_event = mgr
-    assert thread.daemon is True
-    assert thread.name == "ble-asyncio"
+    assert mgr.thread.daemon is True
+    assert mgr.thread.name == "ble-asyncio"
     # Thread should exit quickly since address is empty
-    thread.join(timeout=2)
-    assert not thread.is_alive()
+    mgr.thread.join(timeout=2)
+    assert not mgr.thread.is_alive()
     stop_ble_background(mgr)
 
 
@@ -184,9 +183,8 @@ def test_start_ble_background_creates_daemon() -> None:
     with patch("ble.BleakClient", return_value=mock_client):
         mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
         assert mgr is not None
-        thread, stop_event = mgr
-        assert thread.daemon is True
-        assert thread.name == "ble-asyncio"
+        assert mgr.thread.daemon is True
+        assert mgr.thread.name == "ble-asyncio"
 
         # Wait a tiny bit for the async loop to start
         import time
@@ -194,7 +192,8 @@ def test_start_ble_background_creates_daemon() -> None:
 
         # Stop cleanly
         stop_ble_background(mgr, join_timeout=2)
-        assert not thread.is_alive()
+        assert mgr.stop_event.is_set()
+        assert not mgr.thread.is_alive()
 
 
 def test_stop_ble_background_none() -> None:
@@ -219,5 +218,24 @@ def test_ble_loop_stops_on_stop_event() -> None:
 
         # Stop should cause ble_loop to exit on its own
         stop_ble_background(mgr, join_timeout=3)
-        thread, _ = mgr
-        assert not thread.is_alive()
+        assert mgr.stop_event.is_set()
+        assert not mgr.thread.is_alive()
+
+
+def test_stop_ble_background_cancels_loop_task() -> None:
+    """stop_ble_background asks the owning event loop to cancel the BLE task."""
+    state = AppState()
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.is_connected = True
+
+    with patch("ble.BleakClient", return_value=mock_client):
+        mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
+        assert mgr.ready_event.wait(timeout=2)
+        stop_ble_background(mgr, join_timeout=3)
+
+    assert mgr.stop_event.is_set()
+    assert not mgr.thread.is_alive()
+    assert mgr.task is not None
+    assert mgr.task.done()

@@ -7,7 +7,7 @@ name = "hrm-bar"
 version = "0.1.0"
 description = "macOS menu bar app for BLE heart rate monitor straps"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 
 dependencies = [
     "rumps>=0.4.0",

@@ -22,7 +22,7 @@ from ui.menubar import HRMBarApp
 log = logging.getLogger(__name__)
 
 # Global handle for the BLE manager so the quit handler can stop it.
-_ble_manager = None  # tuple[threading.Thread, threading.Event] | None
+_ble_manager = None
 
 
 def main() -> None:
@@ -52,8 +52,7 @@ def main() -> None:
     atexit.register(_shutdown_ble)
 
     # Create and run the menu bar app (blocks on main thread)
-    app = HRMBarApp(state)
-    app.ble_manager = _ble_manager  # give the app access for quit
+    app = HRMBarApp(state, ble_manager=_ble_manager)
     log.info("Starting HRM menu bar app...")
     app.run()
 

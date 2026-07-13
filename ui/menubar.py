@@ -12,6 +12,7 @@ import logging
 import rumps
 from AppKit import NSAttributedString, NSColor, NSForegroundColorAttributeName
 
+from ble import BLEManager, stop_ble_background
 from state import AppState
 from zones import zone_color
 
@@ -27,9 +28,10 @@ UI_REFRESH_SECONDS = 1.0
 class HRMBarApp(rumps.App):
     """Main menu bar application."""
 
-    def __init__(self, state: AppState) -> None:
+    def __init__(self, state: AppState, ble_manager: BLEManager | None = None) -> None:
         super().__init__("HRM", title=DISCONNECTED_TITLE)
         self.state = state
+        self.ble_manager = ble_manager
         self.popover = HRMPopover(state)
         self.settings = SettingsWindow(state)
         self.popover.on_settings = self.settings.show
@@ -40,7 +42,7 @@ class HRMBarApp(rumps.App):
             None,  # separator
             rumps.MenuItem("Settings", callback=self._open_settings),
             None,
-            rumps.MenuItem("Quit", callback=rumps.quit_application),
+            rumps.MenuItem("Quit", callback=self._quit),
         ]
 
         # 1-second UI refresh timer
@@ -121,3 +123,10 @@ class HRMBarApp(rumps.App):
     def _open_settings(self, _sender: rumps.MenuItem | None = None) -> None:
         """Open the settings window."""
         self.settings.show()
+
+    def _quit(self, _sender: rumps.MenuItem | None = None) -> None:
+        """Stop background work before quitting the AppKit application."""
+        if self.ble_manager is not None:
+            stop_ble_background(self.ble_manager)
+            self.ble_manager = None
+        rumps.quit_application()

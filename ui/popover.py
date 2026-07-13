@@ -19,6 +19,7 @@ from AppKit import (
     NSTextField,
     NSFont,
     NSColor,
+    NSApp,
     NSPopover,
     NSPopoverBehaviorTransient,
     NSViewController,
@@ -100,11 +101,8 @@ class HRMPopover:
         s = self.state
 
         # Root view with dark background
-        root = NSView.alloc().initWithFrame_(((0, 0), (POPOVER_WIDTH, 500)))
-        root.setWantsLayer_(True)
-        root.layer().setBackgroundColor_(
-            NSColor.colorWithCalibratedWhite_alpha_(0.12, 1.0).CGColor()
-        )
+        root = ColoredRectView.alloc().initWithFrame_(((0, 0), (POPOVER_WIDTH, 500)))
+        root.setColor_(_ns_color("#1F1F1F"))
 
         y_offset = 470
 
@@ -218,14 +216,10 @@ class HRMPopover:
                 # Simple bar
                 total = sum(s.zone_times.values()) or 1
                 frac = seconds / total
-                bar = NSView.alloc().initWithFrame_(
+                bar = ColoredRectView.alloc().initWithFrame_(
                     ((115, y_offset - 16), (int(frac * 140), 14))
                 )
-                bar.setWantsLayer_(True)
-                bar.layer().setBackgroundColor_(
-                    _ns_color(zone_color(zone, colors_cfg)).CGColor()
-                )
-                bar.layer().setCornerRadius_(3)
+                bar.setColor_(_ns_color(zone_color(zone, colors_cfg)))
                 root.addSubview_(bar)
 
                 y_offset -= 22
@@ -233,6 +227,9 @@ class HRMPopover:
         y_offset -= 10
 
         # ── Controls ───────────────────────────────────────────────
+        if NSApp() is None:
+            return root
+
         # Session toggle
         if s.session_active:
             btn_title = "■ Stop Session"
@@ -393,13 +390,31 @@ class DonutGaugeView(NSView):
         ctx.restoreGraphicsState()
 
 
+class ColoredRectView(NSView):
+    """Simple colored view that avoids layer-backed AppKit initialization."""
+
+    def initWithFrame_(self, frame: tuple) -> "ColoredRectView":
+        self = objc.super(ColoredRectView, self).initWithFrame_(frame)
+        if self:
+            self._color = NSColor.clearColor()
+        return self
+
+    def setColor_(self, color: NSColor) -> None:
+        self._color = color
+        self.setNeedsDisplay_(True)
+
+    def drawRect_(self, rect: tuple) -> None:
+        self._color.setFill()
+        NSBezierPath.fillRect_(self.bounds())
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
 def _make_label(text: str, font: NSFont, color: NSColor,
                 frame: tuple[float, float, float, float]) -> NSTextField:
     """Convenience: create a non-editable, non-bezelled text field."""
-    f = NSTextField.alloc().initWithFrame_(frame)
+    f = NSTextField.alloc().initWithFrame_(_rect(frame))
     f.setStringValue_(text)
     f.setFont_(font)
     f.setTextColor_(color)
@@ -409,6 +424,14 @@ def _make_label(text: str, font: NSFont, color: NSColor,
     f.setSelectable_(False)
     f.setBordered_(False)
     return f
+
+
+def _rect(frame: tuple) -> tuple:
+    """Accept flat or AppKit-style rect tuples and return AppKit form."""
+    if len(frame) == 2:
+        return frame
+    x, y, width, height = frame
+    return ((x, y), (width, height))
 
 
 def _ns_color(hex_str: str) -> NSColor:

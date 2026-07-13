@@ -57,6 +57,27 @@ def test_import_popover() -> None:
     import ui.popover
 
 
+def test_popover_view_builds_without_appkit_abort() -> None:
+    """Headless popover content avoids controls that require NSApplication."""
+    from state import AppState
+    from ui.popover import HRMPopover
+
+    popover = HRMPopover(AppState())
+    view = popover._build_view()
+
+    assert view is not None
+    assert len(view.subviews()) > 0
+
+
+def test_settings_panel_headless_guard() -> None:
+    """Settings panel fails safely instead of aborting without NSApplication."""
+    from state import AppState
+    from ui.settings import SettingsWindow
+
+    with pytest.raises(RuntimeError, match="NSApplication"):
+        SettingsWindow(AppState())._build_panel()
+
+
 def test_import_graph() -> None:
     """Graph module imports cleanly (requires matplotlib)."""
     import ui.graph

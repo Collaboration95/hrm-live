@@ -68,6 +68,9 @@ class SettingsWindow:
 
     def _build_panel(self) -> None:
         """Build the settings panel."""
+        if NSApp() is None:
+            raise RuntimeError("Settings window requires a running NSApplication")
+
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             ((0, 0), (400, 420)),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskNonactivatingPanel,
@@ -80,21 +83,22 @@ class SettingsWindow:
         panel.center()
 
         content = panel.contentView()
+        cfg = self.state.config or cfg_mod.DEFAULT_CONFIG
 
         # ── Device Address ───────────────────────────────────────────
         y = 380
         lbl = _make_label("Device Address:", (20, y, 120, 22))
         content.addSubview_(lbl)
 
-        addr_field = NSTextField.alloc().initWithFrame_(((150, y), (220, 22)))
-        addr_field.setStringValue_(self.state.config.get("device_address", ""))
+        addr_field = NSTextField.alloc().initWithFrame_(_rect((150, y, 220, 22)))
+        addr_field.setStringValue_(cfg.get("device_address", ""))
         content.addSubview_(addr_field)
         self._controls["device_address"] = addr_field
 
         y -= 30
 
         # Scan button (disabled — v2)
-        scan_btn = NSButton.alloc().initWithFrame_(((150, y), (120, 24)))
+        scan_btn = NSButton.alloc().initWithFrame_(_rect((150, y, 120, 24)))
         scan_btn.setTitle_("Scan (v2)")
         scan_btn.setBezelStyle_(NSBezelStyle.NSBezelStyleRounded)
         scan_btn.setEnabled_(False)
@@ -111,8 +115,8 @@ class SettingsWindow:
         lbl = _make_label("Max HR:", (20, y, 120, 22))
         content.addSubview_(lbl)
 
-        max_hr_field = NSTextField.alloc().initWithFrame_(((150, y), (60, 22)))
-        max_hr_field.setStringValue_(str(self.state.config.get("max_hr", 190)))
+        max_hr_field = NSTextField.alloc().initWithFrame_(_rect((150, y, 60, 22)))
+        max_hr_field.setStringValue_(str(cfg.get("max_hr", 190)))
         max_hr_field.setFormatter_(_int_formatter())
         content.addSubview_(max_hr_field)
         self._controls["max_hr"] = max_hr_field
@@ -124,7 +128,7 @@ class SettingsWindow:
         content.addSubview_(lbl)
         y -= 28
 
-        zones = self.state.config.get("zones", {})
+        zones = cfg.get("zones", {})
         boundaries = [
             ("Z1/Z2 (z1_max)", "z1_max", zones.get("z1_max", 0.60)),
             ("Z2/Z3 (z2_max)", "z2_max", zones.get("z2_max", 0.75)),
@@ -135,7 +139,7 @@ class SettingsWindow:
             lbl.setFont_(NSFont.systemFontOfSize_(11))
             content.addSubview_(lbl)
 
-            field = NSTextField.alloc().initWithFrame_(((170, y), (60, 20)))
+            field = NSTextField.alloc().initWithFrame_(_rect((170, y, 60, 20)))
             # Display as percentage * 100
             field.setStringValue_(f"{val * 100:.0f}")
             field.setFont_(NSFont.systemFontOfSize_(11))
@@ -150,13 +154,13 @@ class SettingsWindow:
         content.addSubview_(lbl)
         y -= 28
 
-        colors = self.state.config.get("zone_colors", {})
+        colors = cfg.get("zone_colors", {})
         for zone in ZONE_ORDER:
             lbl = _make_label(f"  {zone}", (40, y, 50, 20))
             lbl.setFont_(NSFont.systemFontOfSize_(11))
             content.addSubview_(lbl)
 
-            field = NSTextField.alloc().initWithFrame_(((100, y), (80, 20)))
+            field = NSTextField.alloc().initWithFrame_(_rect((100, y, 80, 20)))
             field.setStringValue_(colors.get(zone, DEFAULT_COLORS[zone]))
             field.setFont_(NSFont.systemFontOfSize_(11))
             content.addSubview_(field)
@@ -169,23 +173,23 @@ class SettingsWindow:
         lbl = _make_label("Graph window:", (20, y, 120, 22))
         content.addSubview_(lbl)
 
-        combo = NSComboBox.alloc().initWithFrame_(((150, y), (80, 22)))
+        combo = NSComboBox.alloc().initWithFrame_(_rect((150, y, 80, 22)))
         combo.addItemsWithObjectValues_(["5", "10", "30"])
-        combo.setStringValue_(str(self.state.config.get("graph_window_minutes", 10)))
+        combo.setStringValue_(str(cfg.get("graph_window_minutes", 10)))
         content.addSubview_(combo)
         self._controls["graph_window"] = combo
 
         y -= 50
 
         # ── Buttons ──────────────────────────────────────────────────
-        save_btn = NSButton.alloc().initWithFrame_(((20, y), (100, 28)))
+        save_btn = NSButton.alloc().initWithFrame_(_rect((20, y, 100, 28)))
         save_btn.setTitle_("Save")
         save_btn.setBezelStyle_(NSBezelStyle.NSBezelStyleRounded)
         save_btn.setTarget_(self)
         save_btn.setAction_("save_settings:")
         content.addSubview_(save_btn)
 
-        reset_btn = NSButton.alloc().initWithFrame_(((130, y), (140, 28)))
+        reset_btn = NSButton.alloc().initWithFrame_(_rect((130, y, 140, 28)))
         reset_btn.setTitle_("Reset to Defaults")
         reset_btn.setBezelStyle_(NSBezelStyle.NSBezelStyleRounded)
         reset_btn.setTarget_(self)
@@ -289,7 +293,7 @@ class SettingsWindow:
 
 def _make_label(text: str, frame: tuple[float, float, float, float]) -> NSTextField:
     """Create a non-editable label."""
-    f = NSTextField.alloc().initWithFrame_(frame)
+    f = NSTextField.alloc().initWithFrame_(_rect(frame))
     f.setStringValue_(text)
     f.setFont_(NSFont.systemFontOfSize_(12))
     f.setTextColor_(NSColor.whiteColor())
@@ -299,6 +303,14 @@ def _make_label(text: str, frame: tuple[float, float, float, float]) -> NSTextFi
     f.setSelectable_(False)
     f.setBordered_(False)
     return f
+
+
+def _rect(frame: tuple) -> tuple:
+    """Accept flat or AppKit-style rect tuples and return AppKit form."""
+    if len(frame) == 2:
+        return frame
+    x, y, width, height = frame
+    return ((x, y), (width, height))
 
 
 def _make_separator(origin: tuple[float, float], size: tuple[float, float]) -> NSView:

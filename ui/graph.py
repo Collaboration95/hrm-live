@@ -14,9 +14,16 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+import tempfile
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+_MPLCONFIGDIR = Path(tempfile.gettempdir()) / "hrm-live-matplotlib"
+_MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(_MPLCONFIGDIR))
 
 import matplotlib
 matplotlib.use("Agg")
