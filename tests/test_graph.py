@@ -60,6 +60,13 @@ def test_render_custom_zones() -> None:
         assert isinstance(result, bytes)
 
 
+def test_render_partial_zones_uses_defaults() -> None:
+    rb = _make_ring_buffer([120])
+    result = render_graph(rb, zones={})
+    if result is not None:
+        assert isinstance(result, bytes)
+
+
 def test_render_custom_colors() -> None:
     rb = _make_ring_buffer([120])
     colors = {"Z1": "#ffffff", "Z2": "#000000", "Z3": "#ff0000", "Z4": "#00ff00"}

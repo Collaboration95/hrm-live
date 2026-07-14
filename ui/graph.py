@@ -42,6 +42,7 @@ _ZONE_BAND_COLORS = {
     "Z3": "#ffcc80",
     "Z4": "#ef9a9a",
 }
+_DEFAULT_ZONES = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
 
 
 def render_graph(
@@ -73,10 +74,11 @@ def render_graph(
     if not ring_buffer or len(ring_buffer) < 1:
         return None
 
-    if zones is None:
-        zones = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
-    if zone_colors is None:
-        zone_colors = _ZONE_BAND_COLORS
+    # Accept partial dictionaries as well as None. UI state can be observed
+    # while configuration is being replaced, so rendering must not assume all
+    # nested keys are present.
+    zones = {**_DEFAULT_ZONES, **(zones or {})}
+    zone_colors = {**_ZONE_BAND_COLORS, **(zone_colors or {})}
 
     now = ring_buffer[-1][0]
 
