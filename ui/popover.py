@@ -27,6 +27,7 @@ from AppKit import (
     NSBezelStyleRounded,
     NSBezierPath,
     NSGraphicsContext,
+    NSAttributedString,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
 )
@@ -40,6 +41,7 @@ import session as sess_mod
 log = logging.getLogger(__name__)
 
 POPOVER_WIDTH = 280
+POPOVER_HEIGHT = 620
 GAUGE_SIZE = 110
 GAUGE_LINE_WIDTH = 14
 
@@ -74,18 +76,11 @@ class HRMPopover:
         vc = NSViewController.alloc().init()
         vc.setView_(self._build_view())
         self._popover.setContentViewController_(vc)
-        self._popover.setContentSize_((POPOVER_WIDTH, 500))
-
-        # Determine the positioning view
-        positioning_view = sender
-        if hasattr(sender, "ns_status_item") and sender.ns_status_item:
-            button = sender.ns_status_item.button()
-            if button:
-                positioning_view = button
+        self._popover.setContentSize_((POPOVER_WIDTH, POPOVER_HEIGHT))
 
         self._popover.showRelativeToRect_ofView_preferredEdge_(
-            ((0, 0), (0, 0)),
-            positioning_view,
+            sender.bounds(),
+            sender,
             0,  # NSRectEdgeMinY
         )
 
@@ -101,10 +96,12 @@ class HRMPopover:
         s = self.state
 
         # Root view with dark background
-        root = ColoredRectView.alloc().initWithFrame_(((0, 0), (POPOVER_WIDTH, 500)))
+        root = ColoredRectView.alloc().initWithFrame_(
+            ((0, 0), (POPOVER_WIDTH, POPOVER_HEIGHT))
+        )
         root.setColor_(_ns_color("#1F1F1F"))
 
-        y_offset = 470
+        y_offset = POPOVER_HEIGHT - 30
 
         # ── Resolve config once ────────────────────────────────────
         cfg = s.config or {}
@@ -173,7 +170,7 @@ class HRMPopover:
         else:
             # Empty graph placeholder
             placeholder = _make_label(
-                "No HR data yet — waiting for connection...",
+                _empty_graph_placeholder(s),
                 NSFont.systemFontOfSize_(11),
                 NSColor.grayColor(),
                 (20, y_offset - 20, POPOVER_WIDTH - 40, 40),
@@ -237,20 +234,20 @@ class HRMPopover:
             btn_title = "▶ Start Session"
 
         btn = NSButton.alloc().initWithFrame_(((10, y_offset - 36), (130, 32)))
-        btn.setTitle_(btn_title)
         btn.setBezelStyle_(NSBezelStyleRounded)
         btn.setTarget_(self)
         btn.setAction_(
             "start_session:" if not s.session_active else "stop_session:"
         )
+        _set_dark_button_title(btn, btn_title)
         root.addSubview_(btn)
 
         # Settings button
         settings_btn = NSButton.alloc().initWithFrame_(((150, y_offset - 36), (100, 32)))
-        settings_btn.setTitle_("⚙ Settings")
         settings_btn.setBezelStyle_(NSBezelStyleRounded)
         settings_btn.setTarget_(self)
         settings_btn.setAction_("open_settings:")
+        _set_dark_button_title(settings_btn, "⚙ Settings")
         root.addSubview_(settings_btn)
 
         return root
@@ -259,21 +256,30 @@ class HRMPopover:
 
     def start_session_(self, sender: Any) -> None:
         """Start a new session."""
-        sess_mod.start_session(self.state)
-        self.refresh()
+        try:
+            sess_mod.start_session(self.state)
+            self.refresh()
+        except Exception:
+            log.exception("Failed to start session")
 
     def stop_session_(self, sender: Any) -> None:
         """Stop the active session and export CSV."""
-        cfg = self.state.config or {}
-        max_hr = cfg.get("max_hr", 190)
-        zones_cfg = cfg.get("zones", {})
-        sess_mod.stop_session(self.state, max_hr=max_hr, zones=zones_cfg)
-        self.refresh()
+        try:
+            cfg = self.state.config or {}
+            max_hr = cfg.get("max_hr", 190)
+            zones_cfg = cfg.get("zones", {})
+            sess_mod.stop_session(self.state, max_hr=max_hr, zones=zones_cfg)
+            self.refresh()
+        except Exception:
+            log.exception("Failed to stop session")
 
     def open_settings_(self, sender: Any) -> None:
         """Open the settings window."""
-        if self.on_settings:
-            self.on_settings()
+        try:
+            if self.on_settings:
+                self.on_settings()
+        except Exception:
+            log.exception("Failed to open settings")
 
 
 # ── Donut Gauge View ────────────────────────────────────────────────────
@@ -318,10 +324,24 @@ class DonutGaugeView(NSView):
         return False  # Default AppKit coordinate system
 
     def drawRect_(self, rect: tuple) -> None:
-        """Draw the donut gauge."""
+        """Draw the donut gauge without leaking exceptions into AppKit."""
         ctx = NSGraphicsContext.currentContext()
-        ctx.saveGraphicsState()
+        if ctx is None:
+            return
 
+        ctx.saveGraphicsState()
+        try:
+            self._draw_gauge()
+        except Exception:
+            # Exceptions crossing an Objective-C drawRect: callback cause AppKit
+            # to terminate the entire process. Keep the app alive and log the
+            # rendering error instead.
+            log.exception("Failed to draw heart-rate gauge")
+        finally:
+            ctx.restoreGraphicsState()
+
+    def _draw_gauge(self) -> None:
+        """Render the gauge into the current graphics context."""
         bounds = self.bounds()
         cx = bounds.size.width / 2
         cy = bounds.size.height / 2
@@ -329,7 +349,7 @@ class DonutGaugeView(NSView):
 
         # ---- Background ring ----
         bg_path = NSBezierPath.bezierPath()
-        bg_path.appendBezierPathWithArcWithCenter_startAngle_endAngle_clockwise_(
+        bg_path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
             (cx, cy), radius, 0, 360, False
         )
         bg_path.setLineWidth_(GAUGE_LINE_WIDTH)
@@ -345,7 +365,7 @@ class DonutGaugeView(NSView):
             color.setStroke()
 
             arc_path = NSBezierPath.bezierPath()
-            arc_path.appendBezierPathWithArcWithCenter_startAngle_endAngle_clockwise_(
+            arc_path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
                 (cx, cy), radius, -90, -90 + end_angle, False
             )
             arc_path.setLineWidth_(GAUGE_LINE_WIDTH)
@@ -387,8 +407,6 @@ class DonutGaugeView(NSView):
         y = cy - size.height / 2
         ns_str.drawAtPoint_withAttributes_((x, y), attrs)
 
-        ctx.restoreGraphicsState()
-
 
 class ColoredRectView(NSView):
     """Simple colored view that avoids layer-backed AppKit initialization."""
@@ -404,8 +422,11 @@ class ColoredRectView(NSView):
         self.setNeedsDisplay_(True)
 
     def drawRect_(self, rect: tuple) -> None:
-        self._color.setFill()
-        NSBezierPath.fillRect_(self.bounds())
+        try:
+            self._color.setFill()
+            NSBezierPath.fillRect_(self.bounds())
+        except Exception:
+            log.exception("Failed to draw popover background")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -444,6 +465,36 @@ def _ns_color(hex_str: str) -> NSColor:
         return NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0)
     except Exception:
         return NSColor.whiteColor()
+
+
+def _set_dark_button_title(button: NSButton, title: str) -> None:
+    attrs = {
+        NSForegroundColorAttributeName: NSColor.whiteColor(),
+        NSFontAttributeName: NSFont.systemFontOfSize_(13),
+    }
+    attributed = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
+    button.setTitle_(title)
+    button.setAttributedTitle_(attributed)
+    button.setAccessibilityLabel_(title)
+
+
+def _empty_graph_placeholder(state: AppState) -> str:
+    if state.scan_status == "scanning":
+        return "Scanning for heart-rate monitors..."
+    if state.connection_status in {"connecting", "reconnecting"}:
+        return f"Connecting to {_connection_target_name(state)}..."
+    if state.connection_error:
+        return state.connection_error
+    return "No HR data yet — waiting for connection..."
+
+
+def _connection_target_name(state: AppState) -> str:
+    config = state.config or {}
+    device_name = config.get("device_name", "")
+    if device_name:
+        return device_name
+    device_address = config.get("device_address", "")
+    return device_address or "the selected device"
 
 
 def _format_td(td: Any) -> str:

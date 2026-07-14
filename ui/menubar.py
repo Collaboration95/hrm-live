@@ -33,7 +33,12 @@ class HRMBarApp(rumps.App):
         self.state = state
         self.ble_manager = ble_manager
         self.popover = HRMPopover(state)
-        self.settings = SettingsWindow(state)
+        self.settings = SettingsWindow(
+            state,
+            on_scan=self._start_scan,
+            on_cancel_scan=self._cancel_scan,
+            on_config_saved=self._settings_saved,
+        )
         self.popover.on_settings = self.settings.show
 
         # Menu items
@@ -67,6 +72,8 @@ class HRMBarApp(rumps.App):
         # Refresh popover content if it's open
         if self.popover.is_shown:
             self.popover.refresh()
+        if self.settings.is_visible:
+            self.settings.refresh_from_state()
 
     def _current_zone(self) -> str:
         """Return the current zone string based on state / config."""
@@ -99,15 +106,13 @@ class HRMBarApp(rumps.App):
             color = NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0)
             attrs = {NSForegroundColorAttributeName: color}
 
-            # Try to access the status item button
-            if hasattr(self, "ns_status_item") and self.ns_status_item:
-                button = self.ns_status_item.button()
-                if button:
-                    attributed = NSAttributedString.alloc().initWithString_attributes_(
-                        title, attrs
-                    )
-                    button.setAttributedTitle_(attributed)
-                    return
+            button = self._status_item_button()
+            if button:
+                attributed = NSAttributedString.alloc().initWithString_attributes_(
+                    title, attrs
+                )
+                button.setAttributedTitle_(attributed)
+                return
         except Exception:
             log.debug("Failed to set colored title, using plain text", exc_info=True)
 
@@ -118,11 +123,55 @@ class HRMBarApp(rumps.App):
 
     def _open_popover(self, _sender: rumps.MenuItem | None = None) -> None:
         """Open the dashboard popover."""
-        self.popover.toggle(self)
+        button = self._status_item_button()
+        if button is None:
+            log.error("Cannot open dashboard: menu bar status item is unavailable")
+            return
+        self.popover.toggle(button)
+
+    def _status_item_button(self):
+        """Return the native button owned by rumps' NSStatusItem.
+
+        rumps keeps the status item on its private NSApplication delegate,
+        rather than exposing it directly on ``rumps.App``.
+        """
+        nsapp = getattr(self, "_nsapp", None)
+        status_item = getattr(nsapp, "nsstatusitem", None)
+        return status_item.button() if status_item is not None else None
 
     def _open_settings(self, _sender: rumps.MenuItem | None = None) -> None:
         """Open the settings window."""
         self.settings.show()
+
+    def _start_scan(self) -> None:
+        if self.ble_manager is not None:
+            self.ble_manager.start_scan()
+
+    def _cancel_scan(self) -> None:
+        if self.ble_manager is not None:
+            self.ble_manager.cancel_scan()
+
+    def _settings_saved(self, old_config: dict, new_config: dict) -> None:
+        """React to a successful settings save."""
+
+        if self.ble_manager is None:
+            return
+
+        old_address = (old_config or {}).get("device_address", "")
+        new_address = (new_config or {}).get("device_address", "")
+        current_status = self.state.connection_status
+
+        if old_address != new_address:
+            if not new_address:
+                self.ble_manager.disconnect()
+            else:
+                cached = self.ble_manager.get_cached_device(new_address)
+                self.ble_manager.connect(new_address, cached_device=cached)
+        elif new_address and current_status in {"disconnected", "error"}:
+            cached = self.ble_manager.get_cached_device(new_address)
+            self.ble_manager.connect(new_address, cached_device=cached)
+
+        self.settings.refresh_from_state(force=True)
 
     def _quit(self, _sender: rumps.MenuItem | None = None) -> None:
         """Stop background work before quitting the AppKit application."""
