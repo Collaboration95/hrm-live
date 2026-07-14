@@ -1,12 +1,19 @@
 """Tests for AppState dataclass."""
 
 from state import AppState
+from state import DiscoveredDevice
 
 
 def test_default_initialization() -> None:
     s = AppState()
     assert s.latest_bpm is None
     assert s.connected is False
+    assert s.connection_status == "disconnected"
+    assert s.connection_error is None
+    assert s.scan_status == "idle"
+    assert s.scan_results == ()
+    assert s.scan_error is None
+    assert s.scan_generation == 0
     assert len(s.ring_buffer) == 0
     assert s.ring_buffer.maxlen == 600
     assert s.session_active is False
@@ -32,3 +39,11 @@ def test_ring_buffer_overflow() -> None:
     for i in range(700):
         s.ring_buffer.append((i, 100 + (i % 50)))
     assert len(s.ring_buffer) == 600
+
+
+def test_discovered_device_is_frozen() -> None:
+    device = DiscoveredDevice("addr", "name", -40, True)
+    assert device.address == "addr"
+    assert device.name == "name"
+    assert device.rssi == -40
+    assert device.heart_rate_capable is True

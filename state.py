@@ -13,6 +13,16 @@ from datetime import datetime
 from typing import Any
 
 
+@dataclass(frozen=True)
+class DiscoveredDevice:
+    """Immutable BLE scan result published to the UI."""
+
+    address: str
+    name: str
+    rssi: int | None
+    heart_rate_capable: bool
+
+
 @dataclass
 class AppState:
     """Thread-safe* shared state for the HRM app.
@@ -28,6 +38,16 @@ class AppState:
 
     # Whether a BLE connection is currently established
     connected: bool = False
+
+    # Connection lifecycle and errors exposed to the UI
+    connection_status: str = "disconnected"
+    connection_error: str | None = None
+
+    # Scan lifecycle and results exposed to the UI
+    scan_status: str = "idle"
+    scan_results: tuple[DiscoveredDevice, ...] = ()
+    scan_error: str | None = None
+    scan_generation: int = 0
 
     # Ring buffer of (timestamp, bpm) samples, max 600 = 10 min @ 1 Hz
     ring_buffer: deque = field(

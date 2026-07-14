@@ -24,6 +24,7 @@ def temp_config_path() -> Path:
 def test_default_config_values() -> None:
     cfg = cfg_mod.load_config(path=Path("/nonexistent/config.json"))
     assert cfg["device_address"] == ""
+    assert cfg["device_name"] == ""
     assert cfg["max_hr"] == 190
     assert cfg["zones"]["z1_max"] == 0.60
     assert cfg["zones"]["z2_max"] == 0.75
@@ -44,11 +45,13 @@ def test_save_and_load(temp_config_path: Path) -> None:
     config = cfg_mod.load_config(path=temp_config_path)
     config["max_hr"] = 175
     config["device_address"] = "AA:BB:CC:DD:EE:FF"
+    config["device_name"] = "Polar H10"
     cfg_mod.save_config(config, path=temp_config_path)
 
     loaded = cfg_mod.load_config(path=temp_config_path)
     assert loaded["max_hr"] == 175
     assert loaded["device_address"] == "AA:BB:CC:DD:EE:FF"
+    assert loaded["device_name"] == "Polar H10"
     assert loaded["zones"]["z1_max"] == 0.60  # unchanged
 
 
@@ -87,6 +90,7 @@ def test_empty_json_returns_defaults(temp_config_path: Path) -> None:
     cfg = cfg_mod.load_config(path=temp_config_path)
     assert cfg["max_hr"] == 190
     assert cfg["device_address"] == ""
+    assert cfg["device_name"] == ""
 
 
 def test_partial_config_merges_with_defaults(temp_config_path: Path) -> None:
@@ -99,6 +103,7 @@ def test_partial_config_merges_with_defaults(temp_config_path: Path) -> None:
     assert cfg["max_hr"] == 180
     assert cfg["zones"]["z1_max"] == 0.60  # default
     assert cfg["device_address"] == ""  # default
+    assert cfg["device_name"] == ""  # default
 
 
 def test_extra_keys_ignored(temp_config_path: Path) -> None:
@@ -112,6 +117,17 @@ def test_extra_keys_ignored(temp_config_path: Path) -> None:
     # Extra keys from saved config are preserved (they may be used by future versions)
     # Key requirement: they should not break loading
     assert "future_key" in cfg  # preserved, not harmful
+
+
+def test_device_address_can_be_uuid_string(temp_config_path: Path) -> None:
+    cfg = cfg_mod.load_config(path=temp_config_path)
+    cfg["device_address"] = "7A6B6C7D-8E8F-9091-A1B2-C3D4E5F60708"
+    cfg["device_name"] = "Chest Strap"
+    cfg_mod.save_config(cfg, path=temp_config_path)
+
+    loaded = cfg_mod.load_config(path=temp_config_path)
+    assert loaded["device_address"] == "7A6B6C7D-8E8F-9091-A1B2-C3D4E5F60708"
+    assert loaded["device_name"] == "Chest Strap"
 
 
 # ── Validation ──────────────────────────────────────────────────────────
@@ -149,6 +165,28 @@ def test_validate_invalid_color() -> None:
             "zones": cfg_mod.DEFAULT_CONFIG["zones"],
             "zone_colors": {"Z1": "not-a-color", "Z2": "#4CAF50", "Z3": "#FF9800", "Z4": "#F44336"},
             "graph_window_minutes": 10, "device_address": "",
+        }, path=Path("/tmp/_test_invalid.json.tmp"))
+
+
+def test_validate_device_fields_must_be_strings() -> None:
+    with pytest.raises(ValueError, match="device_address"):
+        cfg_mod.save_config({
+            "device_address": 123,
+            "device_name": "",
+            "max_hr": 190,
+            "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+            "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+            "graph_window_minutes": 10,
+        }, path=Path("/tmp/_test_invalid.json.tmp"))
+
+    with pytest.raises(ValueError, match="device_name"):
+        cfg_mod.save_config({
+            "device_address": "",
+            "device_name": 123,
+            "max_hr": 190,
+            "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+            "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+            "graph_window_minutes": 10,
         }, path=Path("/tmp/_test_invalid.json.tmp"))
 
 

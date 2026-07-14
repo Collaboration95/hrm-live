@@ -18,6 +18,7 @@ from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "device_address": "",
+    "device_name": "",
     "max_hr": 190,
     "zones": {
         "z1_max": 0.60,
@@ -85,6 +86,16 @@ def save_config(config: dict[str, Any], path: Path | None = None) -> None:
 def _validate_config(config: dict[str, Any]) -> None:
     """Raise ``ValueError`` if *config* contains invalid values."""
     errors: list[str] = []
+
+    device_address = config.get("device_address", "")
+    if not isinstance(device_address, str):
+        errors.append(
+            f"device_address must be a string, got {device_address!r}"
+        )
+
+    device_name = config.get("device_name", "")
+    if not isinstance(device_name, str):
+        errors.append(f"device_name must be a string, got {device_name!r}")
 
     max_hr = config.get("max_hr", 190)
     if not isinstance(max_hr, int) or max_hr <= 0:

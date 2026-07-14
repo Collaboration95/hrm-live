@@ -2,7 +2,7 @@
 """HRM Live — macOS menu bar heart rate monitor.
 
 Entry point. Loads config, initializes shared state, starts the BLE
-background thread (if a device address is configured), and runs the
+background thread, and runs the
 rumps app on the main thread.
 
 On quit the BLE thread is stopped cleanly to avoid CoreBluetooth
@@ -39,14 +39,14 @@ def main() -> None:
     state = AppState()
     state.config = config
 
-    # Start BLE background thread if a device address is configured
+    # Start the persistent BLE background thread even when no device is saved.
     device_addr = config.get("device_address", "")
+    from ble import start_ble_background
+    _ble_manager = start_ble_background(state, device_addr)
     if device_addr:
-        from ble import start_ble_background
-        _ble_manager = start_ble_background(state, device_addr)
-        log.info("BLE thread started for %s", device_addr[:8])
+        log.info("BLE thread started with initial device %s", device_addr[:8])
     else:
-        log.info("No device address configured — BLE thread not started")
+        log.info("BLE thread started without an initial device")
 
     # Register atexit shutdown for BLE thread
     atexit.register(_shutdown_ble)
