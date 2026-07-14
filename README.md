@@ -144,3 +144,19 @@ docs/
 ## License
 
 MIT
+
+## Feature Tracking
+
+Planned follow-up work for the app:
+
+1. Fix the double quit button bug, or unify the quit behavior if the two
+   controls are intended to do the same thing.
+2. Plan CSV saving through a standard Finder-style save dialog instead of
+   writing session data to a fixed random location.
+3. Change the default popover behavior so the dashboard opens first on click,
+   with settings and quit actions moved to the bottom as secondary controls.
+4. Improve code cleanliness by moving implementation code into `src/` and
+   adding proper comments where they clarify non-obvious logic.
+
+These items are documentation-only for now and should be tracked before the
+next implementation pass.
