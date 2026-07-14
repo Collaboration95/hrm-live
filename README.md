@@ -25,38 +25,70 @@ with a zone gauge, HR graph, and session recording.
 ```bash
 # Clone the repository
 git clone <repo-url>
-cd hrm-bar
+cd hrm-live
 
-# Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -e ".[dev]"
+# Create a virtual environment and install dependencies
+make venv
+make install
 ```
 
-## Running in Dev Mode
+## Startup Instructions
+
+Use the Makefile from the repository root for normal development workflows.
+
+Run the app in development mode:
 
 ```bash
-python app.py
+make run
 ```
 
 The app will appear in the menu bar. If no device address is configured,
 it will show a grey disconnected indicator.
 
-## Running Tests
-
-Make sure the virtual environment is active first:
+Run the automated checks:
 
 ```bash
-source .venv/bin/activate
-pytest -v
+make check
 ```
 
-Or run directly:
+Build the macOS `.app` bundle:
 
 ```bash
-.venv/bin/python -m pytest -v
+make package
+```
+
+The bundle is created at `dist/HRM Live.app`. `make package` also verifies
+the bundle signature, embedded entitlements, and Info.plist metadata.
+
+Open the built app:
+
+```bash
+open "dist/HRM Live.app"
+```
+
+Useful Makefile targets:
+
+```bash
+make help           # Show all available targets
+make test           # Run pytest
+make compile        # Compile-check Python files
+make build          # Build dist/HRM Live.app
+make verify-bundle  # Verify an existing app bundle
+make clean          # Remove generated build/test artifacts
+```
+
+## Running Tests
+
+Run the default test suite:
+
+```bash
+make test
+```
+
+Or run verbose tests:
+
+```bash
+make test-verbose
 ```
 
 With coverage:
