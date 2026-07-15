@@ -118,6 +118,8 @@ def test_invalid_bpm_and_backward_timestamp_are_ignored(state: AppState) -> None
 
     assert state.session_count == 1
     assert [sample.bpm for sample in state.session_data] == [120]
+    assert state.latest_bpm == 120
+    assert [bpm for _, bpm in state.ring_buffer] == [120]
 
 
 def test_write_failure_keeps_retryable_snapshot(state: AppState, tmp_path: Path) -> None:

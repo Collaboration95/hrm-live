@@ -401,11 +401,11 @@ checked and the evidence is linked or pasted.
 
 | Phase | Status | Commit(s) | Automated evidence | Manual/release evidence | Deviations / remaining risk |
 | --- | --- | --- | --- | --- | --- |
-| A — quality gate | complete-local | 715c6d5 | `make check` passed locally; CI workflow added | GitHub Actions not pushed/run in this session | CI green URL pending after push |
+| A — quality gate | complete-local | 715c6d5 + follow-up | `make check` passed locally; CI workflow added | GitHub Actions not pushed/run in this session | CI green URL pending after push |
 | B — `src` migration | complete-local | 715c6d5 | stale-import grep clean; outside-repo import smoke passed; `make check` passed | py2app build/verify passed locally | No root runtime modules remain |
 | C — dashboard/quit | partial | 715c6d5 | shutdown coordinator and routing tests covered by import/unit suite; `make check` passed | real menu-bar duplicate-Quit reproduction and click-through checklist pending | Manual macOS UI verification still required |
-| D — save/export | complete-local | 715c6d5 | session/export tests cover finalize, explicit destination, cancel/retry, atomic write, historical zones, delta/gap accounting | spreadsheet/manual Desktop CSV check pending | Automated tests use injected paths and no modal panels |
-| E — state/performance/docs | complete-local | 715c6d5 | state stress snapshot test and graph cache path added; `make check` passed | sustained-stream flicker observation pending | Popover still rebuilds NSView tree, but graph rendering is cached |
+| D — save/export | complete-local | 715c6d5 + follow-up | session/export tests cover finalize, explicit destination, cancel/retry, atomic write, historical zones, delta/gap accounting, backward timestamp rejection | spreadsheet/manual Desktop CSV check pending | Automated tests use injected paths and no modal panels |
+| E — state/performance/docs | complete-local | 715c6d5 + follow-up | state stress snapshot test, graph cache path, and synchronized BLE/settings state access added; `make check` passed | sustained-stream flicker observation pending | Popover still rebuilds NSView tree, but graph rendering is cached |
 | F — bundle/release | blocked | 715c6d5 | `make build` and `make verify-bundle` passed for ad-hoc local app | `spctl --assess` failed for ad-hoc app; hardware, notarization, release publication pending | Requires Developer ID/notarization credentials, owner approval, valid `.icns` packaging, real strap test |
 
 For each completed row, add beneath the table:
@@ -426,9 +426,9 @@ For each completed row, add beneath the table:
 - commit: 715c6d5
 - files changed: `.github/workflows/ci.yml`, `pyproject.toml`, `Makefile`, `README.md`
 - commands run: `.venv/bin/python -m pip install -e ".[dev,build]"` passed after network approval; `make check` passed
-- new/updated tests: existing 110-test suite retained; coverage gate measured at 54.79% and threshold set to 54%
+- new/updated tests: 111-test suite retained/expanded; coverage measured at 56.72% and threshold set to 54%
 - manual test environment: macOS Darwin, Python 3.14.6 local development venv
-- acceptance criteria: dev/build extras install; CI workflow added for Python 3.11/3.12 and macOS bundle smoke; quality commands run without ignored failures
+- acceptance criteria: dev/build extras install; CI workflow added for Python 3.11/3.12 and macOS bundle smoke; quality commands run without ignored failures or blanket warning suppression
 - deviation: CI was not pushed/run, so green CI URL is pending
 - reviewer: pending
 
@@ -438,7 +438,7 @@ For each completed row, add beneath the table:
 - commands run: `rg -n 'from (app|ble|config|session|state|zones|ui) import|import (app|ble|config|session|state|zones)' src tests` returned no matches; outside-repo smoke `/Users/speedpowermac/Documents/projects/CODE_MAIN/personal/hrm-live/.venv/bin/python -c "import hrm_live; import hrm_live.app; import hrm_live.ble; print(hrm_live.__version__)"` from `/private/tmp` printed `0.1.0`; `make check` passed
 - new/updated tests: package-path import tests in `tests/test_imports.py`
 - manual test environment: macOS Darwin, Python 3.14.6 local development venv
-- acceptance criteria: root runtime modules removed; package imports work from outside repo; config path unchanged; 110 behavioral tests retained
+- acceptance criteria: root runtime modules removed; package imports work from outside repo; config path unchanged; 111 behavioral tests retained
 - deviation: app launch was not performed interactively to avoid opening UI during automated work
 - reviewer: pending
 
@@ -456,9 +456,9 @@ For each completed row, add beneath the table:
 - commit: 715c6d5
 - files changed: `src/hrm_live/session.py`, `src/hrm_live/state.py`, `src/hrm_live/ui/popover.py`, `tests/test_session.py`
 - commands run: `make check` passed
-- new/updated tests: `tests/test_session.py` covers finalization, explicit CSV path normalization, atomic replace, write failure, cancel/retry retention, historical zone preservation, delta accounting, gap clamp, invalid BPM, and backward timestamps
+- new/updated tests: `tests/test_session.py` covers finalization, explicit CSV path normalization, atomic replace, write failure, cancel/retry retention, historical zone preservation, delta accounting, gap clamp, invalid BPM, and backward timestamps before ring/latest updates
 - manual test environment: macOS Darwin, Python 3.14.6 local development venv using temporary paths and injected save-panel factory
-- acceptance criteria: no normal code path writes to `~/.local/share/hrm/sessions/`; CSV columns remain `timestamp,bpm,zone`; cancel and failure retain retryable completed session
+- acceptance criteria: no normal code path writes to `~/.local/share/hrm/sessions/`; CSV columns remain `timestamp,bpm,zone`; cancel and failure retain retryable completed session; dashboard elapsed display uses clamped accumulated zone seconds
 - deviation: manual Desktop save/spreadsheet check pending
 - reviewer: pending
 
@@ -466,9 +466,9 @@ For each completed row, add beneath the table:
 - commit: 715c6d5
 - files changed: `src/hrm_live/state.py`, `src/hrm_live/ui/popover.py`, `src/hrm_live/ui/graph.py`, `tests/test_state.py`
 - commands run: `make check` passed
-- new/updated tests: `test_fast_producer_and_snapshots_do_not_mutate_during_iteration`, `test_snapshot_copies_ring_buffer`, session snapshot/export tests
+- new/updated tests: `test_fast_producer_and_snapshots_do_not_mutate_during_iteration`, `test_snapshot_copies_ring_buffer`, session snapshot/export tests, clamped-duration display helper test
 - manual test environment: macOS Darwin, Python 3.14.6 local development venv
-- acceptance criteria: immutable snapshots copy ring/session data under lock; graph render cache keyed by ring revision/config; comments document lock, PyObjC selector, and gap policy rationale
+- acceptance criteria: immutable snapshots copy ring/session data under lock; BLE lifecycle writes use synchronized update methods; settings reads use snapshots; graph render cache keyed by ring revision/config; comments document lock, PyObjC selector, and gap policy rationale
 - deviation: UI still rebuilds the view tree each refresh; graph work is cached, but manual sustained-stream flicker observation is pending
 - reviewer: pending
 

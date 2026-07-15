@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import UTC, datetime
 from typing import Any
 
 import objc
@@ -186,15 +185,7 @@ class HRMPopover:
 
         # ── Session stats ──────────────────────────────────────────
         if s.session_active or s.session_count > 0:
-            # Elapsed time
-            if s.session_active and s.session_start:
-                elapsed = datetime.now(UTC) - s.session_start
-                elapsed_str = _format_td(elapsed)
-            elif s.session_start and s.session_data:
-                elapsed = s.session_data[-1].timestamp - s.session_data[0].timestamp
-                elapsed_str = _format_td(elapsed)
-            else:
-                elapsed_str = "00:00:00"
+            elapsed_str = _format_td_seconds(sum(s.zone_times.values()))
 
             avg = s.session_sum / s.session_count if s.session_count > 0 else 0
             mx = s.session_max if s.session_count > 0 else 0
@@ -597,9 +588,9 @@ def _connection_target_name(state: UISnapshot) -> str:
     return device_address or "the selected device"
 
 
-def _format_td(td: Any) -> str:
-    """Format timedelta to HH:MM:SS."""
-    total = int(td.total_seconds())
+def _format_td_seconds(seconds: float) -> str:
+    """Format elapsed seconds to HH:MM:SS."""
+    total = int(seconds)
     h, remainder = divmod(total, 3600)
     m, s = divmod(remainder, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"

@@ -29,7 +29,13 @@ ad-hoc bundle, and Developer ID/notarization credentials were not provided.
 - Stored zone at sample receipt time.
 - Changed zone duration accounting to timestamp deltas assigned to the
   previous sample's zone, clamped at 5 seconds per gap.
+- Dashboard elapsed session display now uses those accumulated clamped zone
+  seconds rather than wall-clock time.
+- Backward timestamps are rejected before updating latest BPM or the graph
+  ring buffer.
 - Added graph rendering cache keyed by ring-buffer revision and graph config.
+- Routed BLE lifecycle updates and settings reads through the synchronized
+  state API/snapshots.
 - Added dashboard-first status-button action and a guarded shutdown
   coordinator.
 - Added footer Settings and Quit controls.
@@ -51,11 +57,12 @@ make verify-bundle
 
 `make check` result:
 
-- 110 tests passed.
-- Coverage: 54.79%, required threshold 54%.
+- 111 tests passed.
+- Coverage: 56.72%, required threshold 54%.
 - Ruff format/lint passed.
 - mypy passed.
 - compileall passed.
+- No blanket pytest warning suppression is configured.
 
 Bundle verification:
 
@@ -91,4 +98,16 @@ tree for inspection. Its queued client id is:
 
 `client-new-thread:d7f3570e-19ca-452d-81ab-5f47da61d56c`
 
-Findings were not available yet when this note was written.
+That queued task was not readable before completion of this implementation.
+The available multi-agent runtime did not expose `gpt-5.4-mini`, so a
+read-only fallback inspector (`gpt-5.4`, agent `019f664b-6e7a-7421-a77d-86b7b6c79093`)
+was spawned and reported:
+
+- Dashboard duration used wall-clock/raw first-last sample time.
+- Backward timestamps updated latest BPM and ring buffer before rejection.
+- BLE/settings did not fully use the synchronized state API.
+- Icon, warning suppression, and docs/release-state issues remained.
+
+The first three code issues and the warning/docs issues were fixed in the
+follow-up pass. The icon remains a Phase F blocker because `iconutil` rejects
+the generated iconset in this environment.

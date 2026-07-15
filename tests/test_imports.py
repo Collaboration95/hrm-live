@@ -117,6 +117,14 @@ def test_popover_view_builds_without_appkit_abort() -> None:
     assert len(view.subviews()) > 0
 
 
+def test_popover_duration_formats_clamped_zone_seconds() -> None:
+    """Dashboard duration uses accumulated zone seconds, not wall time."""
+    from hrm_live.ui.popover import _format_td_seconds
+
+    assert _format_td_seconds(8.9) == "00:00:08"
+    assert _format_td_seconds(3661) == "01:01:01"
+
+
 def test_settings_panel_headless_guard() -> None:
     """Settings panel fails safely instead of aborting without NSApplication."""
     from hrm_live.state import AppState

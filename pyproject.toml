@@ -44,10 +44,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::ImportWarning",
-]
 
 [tool.coverage.run]
 branch = true

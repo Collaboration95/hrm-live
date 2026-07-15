@@ -83,12 +83,13 @@ class SettingsWindow:
         if not self.is_visible:
             return
 
+        snapshot = self.state.snapshot_for_ui()
         signature = (
-            self.state.scan_generation,
-            self.state.scan_status,
-            self.state.scan_error,
-            self.state.connection_status,
-            self.state.connection_error,
+            snapshot.scan_generation,
+            snapshot.scan_status,
+            snapshot.scan_error,
+            snapshot.connection_status,
+            snapshot.connection_error,
         )
         if not force and signature == self._last_state_signature:
             return
@@ -117,7 +118,7 @@ class SettingsWindow:
         panel.center()
 
         content = panel.contentView()
-        cfg = self.state.config or cfg_mod.DEFAULT_CONFIG
+        cfg = self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG
 
         y = PANEL_HEIGHT - 40
 
@@ -246,7 +247,7 @@ class SettingsWindow:
 
     def scan_action_(self, sender: Any) -> None:
         try:
-            if self.state.scan_status == "scanning":
+            if self.state.snapshot_for_ui().scan_status == "scanning":
                 if self.on_cancel_scan is not None:
                     self.on_cancel_scan()
             else:
@@ -282,12 +283,13 @@ class SettingsWindow:
 
     def save_settings_(self, sender: Any) -> None:
         try:
-            old_config = deepcopy(self.state.config or cfg_mod.DEFAULT_CONFIG)
+            old_config = deepcopy(self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG)
             new_config = self._collect_values()
             cfg_mod.save_config(new_config)
-            self.state.config = cfg_mod.load_config()
+            self.state.set_config(cfg_mod.load_config())
+            saved_config = self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG
             if self.on_config_saved is not None:
-                self.on_config_saved(old_config, deepcopy(self.state.config))
+                self.on_config_saved(old_config, deepcopy(saved_config))
             self.refresh_from_state(force=True)
             log.info("Settings saved")
         except (ValueError, OSError) as exc:
@@ -312,7 +314,7 @@ class SettingsWindow:
         self._set_status_text("Defaults loaded. Click Save to apply.")
 
     def _sync_config_fields(self) -> None:
-        cfg = self.state.config or cfg_mod.DEFAULT_CONFIG
+        cfg = self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG
         self._set_text("device_address", cfg.get("device_address", ""))
         self._set_text("device_name", cfg.get("device_name", ""))
         self._set_text("max_hr", str(cfg.get("max_hr", 190)))
@@ -338,7 +340,7 @@ class SettingsWindow:
         if popup is None:
             return
 
-        results = list(self.state.scan_results)
+        results = list(self.state.snapshot_for_ui().scan_results)
         popup.removeAllItems()
         self._scan_result_addresses = []
 
@@ -377,21 +379,23 @@ class SettingsWindow:
         index = popup.indexOfSelectedItem()
         if index < 0:
             return None
-        results = list(self.state.scan_results)
+        results = list(self.state.snapshot_for_ui().scan_results)
         if index >= len(results):
             return None
         return results[index]
 
     def _scan_button_title(self) -> str:
-        if self.state.scan_status == "scanning":
+        status = self.state.snapshot_for_ui().scan_status
+        if status == "scanning":
             return "Cancel Scan"
-        if self.state.scan_status in {"complete", "cancelled", "error"}:
+        if status in {"complete", "cancelled", "error"}:
             return "Scan Again"
         return "Scan for HRMs"
 
     def _scan_status_text(self) -> str:
-        status = self.state.scan_status
-        count = len(self.state.scan_results)
+        snapshot = self.state.snapshot_for_ui()
+        status = snapshot.scan_status
+        count = len(snapshot.scan_results)
         if status == "scanning":
             return f"Scanning... {count} found"
         if status == "complete":
@@ -403,26 +407,27 @@ class SettingsWindow:
                 return "Scan cancelled."
             return f"Scan cancelled. {count} devices found so far."
         if status == "error":
-            return self.state.scan_error or "Scan failed. Try again."
+            return snapshot.scan_error or "Scan failed. Try again."
         return "Click Scan for HRMs to find nearby heart-rate monitors."
 
     def _connection_status_text(self) -> str:
-        status = self.state.connection_status
+        snapshot = self.state.snapshot_for_ui()
+        status = snapshot.connection_status
         device_name = self._current_connection_name()
         if status == "connected":
             return f"Connected to {device_name}"
         if status == "connecting":
             return f"Connecting to {device_name}..."
         if status == "reconnecting":
-            if self.state.connection_error:
-                return f"Reconnecting to {device_name}... {self.state.connection_error}"
+            if snapshot.connection_error:
+                return f"Reconnecting to {device_name}... {snapshot.connection_error}"
             return f"Reconnecting to {device_name}..."
         if status == "error":
-            return self.state.connection_error or "Connection failed."
+            return snapshot.connection_error or "Connection failed."
         return "Not connected"
 
     def _current_connection_name(self) -> str:
-        cfg = self.state.config or {}
+        cfg = self.state.snapshot_for_ui().config or {}
         device_address = cfg.get("device_address", "")
         device_name = cfg.get("device_name", "")
         if device_name:
@@ -435,14 +440,14 @@ class SettingsWindow:
         return "the selected device"
 
     def _scan_name_for_address(self, address: str) -> str:
-        for result in self.state.scan_results:
+        for result in self.state.snapshot_for_ui().scan_results:
             if result.address == address:
                 return result.name
         return ""
 
     def _collect_values(self) -> dict[str, Any]:
         c = self._controls
-        base = deepcopy(self.state.config or cfg_mod.DEFAULT_CONFIG)
+        base = deepcopy(self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG)
 
         device_address = c["device_address"].stringValue().strip()
         device_name = c["device_name"].stringValue().strip()

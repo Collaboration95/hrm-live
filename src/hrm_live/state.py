@@ -126,11 +126,13 @@ class AppState:
             return False
 
         with self._lock:
-            self.latest_bpm = bpm
-            self.ring_buffer.append((timestamp, bpm))
-            self._ring_revision += 1
+            if self.ring_buffer and timestamp < self.ring_buffer[-1][0]:
+                return False
 
             if not self.session_active:
+                self.latest_bpm = bpm
+                self.ring_buffer.append((timestamp, bpm))
+                self._ring_revision += 1
                 return True
 
             zone = self._zone_for_bpm(bpm)
@@ -144,6 +146,9 @@ class AppState:
                     self._last_session_sample.zone, 0.0
                 ) + min(delta, MAX_SESSION_GAP_SECONDS)
 
+            self.latest_bpm = bpm
+            self.ring_buffer.append((timestamp, bpm))
+            self._ring_revision += 1
             self.session_data.append(sample)
             self._last_session_sample = sample
             self.session_count += 1

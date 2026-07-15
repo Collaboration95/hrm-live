@@ -175,11 +175,16 @@ MIT
 
 ## Feature Tracking
 
-Release tracker:
+Release tracker, local implementation state:
 
-1. Dashboard-first status item interaction: implemented; manual real-UI
-   verification still pending.
-2. Finder-style CSV saving: implemented with cancel/retry and atomic writes.
-3. Single guarded quit path: implemented; manual real-UI verification still
-   pending for all BLE states.
-4. Native `src/hrm_live` package layout and focused comments: implemented.
+1. Dashboard-first status item interaction: implemented in code; manual
+   real-UI verification still pending.
+2. Finder-style CSV saving: implemented and covered by injected-path tests;
+   manual Desktop/spreadsheet verification still pending.
+3. Single guarded quit path: implemented in code; manual real-UI verification
+   still pending for all BLE states.
+4. Native `src/hrm_live` package layout and focused comments: implemented and
+   covered by local quality checks.
+
+This is not a released build until the checklist in
+`docs/RELEASE_CHECKLIST.md` is complete.
