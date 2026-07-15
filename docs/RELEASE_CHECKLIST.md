@@ -58,7 +58,7 @@ rebuilt and signed through the authorized Developer ID process after this gate.
 | Check | Required result | Result / evidence |
 | --- | --- | --- |
 | `make install` | Dependencies install without unpinned local edits | |
-| `make check` | Ruff, mypy, 115+ tests, coverage threshold, compileall pass | |
+| `make check` | Ruff, mypy, 121+ tests, coverage threshold, compileall pass | |
 | `make package` | Bundle builds, contains `HRMLive.icns`, verifies internal signature and Bluetooth metadata | |
 | `codesign --verify --deep --strict` on final artifact | Passes after Developer ID signing | |
 | `spctl --assess --type execute --verbose` on final artifact | Accepted after notarization/stapling | |

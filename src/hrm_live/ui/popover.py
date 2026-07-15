@@ -321,13 +321,36 @@ class HRMPopover:
             self._on_quit()
 
     def _save_snapshot(self, snapshot: ExportSnapshot) -> None:
-        destination = self._save_panel_factory(sess_mod.suggested_csv_filename())
+        """Open a destination picker and save without leaking callback errors.
+
+        This method runs from AppKit button selectors.  Exceptions must not
+        cross that native callback boundary: keep the completed snapshot
+        retryable and publish concise feedback for both save-panel and file-I/O
+        failures instead.
+        """
+
+        try:
+            destination = self._save_panel_factory(sess_mod.suggested_csv_filename())
+        except Exception:
+            log.exception("Failed to open session save panel")
+            self.state.mark_export_failure("Could not open the save dialog. Try again.")
+            return
         if destination is None:
             return
         try:
             path = sess_mod.export_session_csv(snapshot, destination)
-        except Exception as exc:
+        except ValueError as exc:
+            # Validation messages originate in session.py and are safe to show.
+            log.info("Session export destination was rejected: %s", exc)
             self.state.mark_export_failure(str(exc))
+        except OSError:
+            log.exception("Failed to write session CSV")
+            self.state.mark_export_failure(
+                "Could not write the CSV. Check the destination and try again."
+            )
+        except Exception:
+            log.exception("Failed to export session CSV")
+            self.state.mark_export_failure("Could not save the session. Try again.")
         else:
             self.state.mark_export_success(str(path))
 

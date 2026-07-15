@@ -23,8 +23,8 @@ or public-release status.
 | Claim | Result | Evidence |
 | --- | --- | --- |
 | Package migration exists | Verified | Runtime modules are only under `src/hrm_live`; root runtime modules were removed. |
-| Local quality gate passes | Verified | `make check`: Ruff format/lint, mypy, 115 pytest tests, coverage, and compileall all passed. |
-| Coverage requirement passes | Verified, but weak | Current run: **57.47%** against a **54%** threshold. Core UI files remain lightly covered (`menubar` 30%, `popover` 38%, `settings` 39%). |
+| Local quality gate passes | Verified | `make check`: Ruff format/lint, mypy, 121 pytest tests, coverage, and compileall all passed. |
+| Coverage requirement passes | Verified, but weak | Current run: **58.13%** against a **54%** threshold. Core UI files remain lightly covered (`menubar` 30%, `popover` 40%, `settings` 39%). |
 | Explicit CSV writer exists | Verified | `finalize_session`, `export_session_csv`, sibling-temp-file replacement, captured zones, and timestamp-gap clamping are present. |
 | Bundle builds and is internally signed | Verified only for development | `make verify-bundle` passed. `codesign -dv` reports `Signature=adhoc`, no TeamIdentifier. |
 | Bundle is a trusted distributable app | Not verified / false | `spctl --assess --type execute --verbose` fails with `internal error in Code Signing subsystem`; ad-hoc signing is not a public-release signature. |
@@ -143,7 +143,11 @@ re-finalization/retry can still see the already-saved payload.
 
 **Local resolution.** `_export_feedback()` now renders a failure message and
 retry control together. `mark_export_success()` clears the pending export.
-Focused tests verify the error/retry feedback and successful-save state cleanup.
+Save-panel failures are now caught before they can escape a native AppKit
+callback; file-system failures are logged locally but mapped to concise,
+path-safe dashboard feedback. Focused tests verify the error/retry feedback,
+successful-save state cleanup, save-panel containment, and path-safe write
+failure feedback.
 
 ## P1 — required for a releasable product
 
@@ -245,6 +249,11 @@ and hosted CI remain owner-managed external work.
 4. Preserve the implemented graph cache, but assess the remaining full
    `NSView` rebuild during a sustained real stream. Fix visible flicker or
    input loss before release.
+5. Treat syntactically valid but semantically invalid configuration as a
+   recovery case, not as trusted startup input. This is now resolved locally:
+   `load_config()` validates the merged configuration, quarantines invalid JSON
+   objects as `.corrupt`, and starts from defaults. Coverage includes invalid
+   root, maximum-HR, zones, and color structures.
 
 ## Ordered implementation plan
 
@@ -277,7 +286,7 @@ and hosted CI remain owner-managed external work.
 - P0 code changes: status-item lifecycle, retained `NSObject` action bridge,
   default Quit removal, export error feedback, and successful-export cleanup.
 - Focused tests: 32 passed (`tests/test_imports.py`, `tests/test_session.py`).
-- Full local quality gate: 115 passed; Ruff, mypy, coverage (**57.47%**), and
+- Full local quality gate: 121 passed; Ruff, mypy, coverage (**58.13%**), and
   compileall passed.
 - Local OSS repository artifacts: contribution, security, conduct, support,
   issue/PR templates, and Dependabot configuration were added.

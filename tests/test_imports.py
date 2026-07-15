@@ -145,6 +145,63 @@ def test_popover_export_feedback_shows_error_with_retry() -> None:
     )
 
 
+def test_save_panel_failure_keeps_export_retryable() -> None:
+    """A native save-panel failure cannot escape the AppKit action callback."""
+    from datetime import UTC, datetime
+
+    from hrm_live.state import AppState
+    from hrm_live.ui.popover import HRMPopover, _export_feedback
+
+    state = AppState()
+    state.start_session(datetime(2026, 7, 15, tzinfo=UTC))
+    state.record_bpm(datetime(2026, 7, 15, 0, 0, 1, tzinfo=UTC), 120)
+    snapshot = state.finalize_session()
+    assert snapshot is not None
+
+    def unavailable_panel(_default_name: str) -> str | None:
+        raise RuntimeError("NSApplication unavailable")
+
+    HRMPopover(state, save_panel_factory=unavailable_panel)._save_snapshot(snapshot)
+
+    assert state.pending_export_snapshot() is snapshot
+    assert _export_feedback(state.snapshot_for_ui()) == (
+        True,
+        "Save failed: Could not open the save dialog. Try again.",
+        True,
+    )
+
+
+def test_export_os_error_hides_selected_path_from_feedback(tmp_path) -> None:
+    """Raw filesystem errors stay in logs rather than the user-visible dashboard."""
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    from hrm_live.state import AppState
+    from hrm_live.ui.popover import HRMPopover, _export_feedback
+
+    state = AppState()
+    state.start_session(datetime(2026, 7, 15, tzinfo=UTC))
+    state.record_bpm(datetime(2026, 7, 15, 0, 0, 1, tzinfo=UTC), 120)
+    snapshot = state.finalize_session()
+    assert snapshot is not None
+
+    selected_path = tmp_path / "private-workout.csv"
+    popover = HRMPopover(state, save_panel_factory=lambda _default_name: str(selected_path))
+    with patch(
+        "hrm_live.ui.popover.sess_mod.export_session_csv",
+        side_effect=OSError(f"Permission denied: {selected_path}"),
+    ):
+        popover._save_snapshot(snapshot)
+
+    show_retry, message, is_error = _export_feedback(state.snapshot_for_ui())
+    assert (show_retry, message, is_error) == (
+        True,
+        "Save failed: Could not write the CSV. Check the destination and try again.",
+        True,
+    )
+    assert str(selected_path) not in message
+
+
 def test_status_item_is_configured_only_after_rumps_creates_it() -> None:
     """Dashboard-first wiring clears rumps' menu after status-bar setup."""
     from hrm_live.ui.menubar import HRMBarApp, _StatusButtonTarget

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -44,9 +45,9 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config from *path* (default ~/.config/hrm/config.json).
 
     Returns a merged dict of defaults + saved values.  If the file is
-    missing, returns defaults unchanged.  If the file is malformed JSON,
-    the broken file is renamed with a ``.corrupt`` suffix and defaults
-    are returned.
+    missing, returns defaults unchanged. If its JSON structure or supported
+    values are invalid, the file is renamed with a ``.corrupt`` suffix and
+    defaults are returned.
     """
     cfg_path = path or CONFIG_PATH
     if not cfg_path.exists():
@@ -54,16 +55,26 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
 
     try:
         raw = cfg_path.read_text(encoding="utf-8")
-        saved: dict[str, Any] = json.loads(raw)
+        saved: Any = json.loads(raw)
     except (json.JSONDecodeError, OSError):
         # Rename broken file so the user can recover it
         _safely_rename_corrupt(cfg_path)
         return _deep_copy(DEFAULT_CONFIG)
 
-    # Merge — saved keys override defaults, missing keys stay at defaults
+    if not isinstance(saved, dict):
+        _safely_rename_corrupt(cfg_path)
+        return _deep_copy(DEFAULT_CONFIG)
+
+    # Merge — saved keys override defaults, missing keys stay at defaults.
+    # Validate the merged result, rather than only writes made through the
+    # settings UI, because users can edit this JSON outside the application.
     merged = _deep_copy(DEFAULT_CONFIG)
-    if isinstance(saved, dict):
-        _deep_merge(merged, saved)
+    _deep_merge(merged, saved)
+    try:
+        _validate_config(merged)
+    except ValueError:
+        _safely_rename_corrupt(cfg_path)
+        return _deep_copy(DEFAULT_CONFIG)
     return merged
 
 
@@ -101,24 +112,32 @@ def _validate_config(config: dict[str, Any]) -> None:
         errors.append(f"max_hr must be a positive integer, got {max_hr!r}")
 
     zones = config.get("zones", {})
-    try:
-        z1 = float(zones.get("z1_max", 0.60))
-        z2 = float(zones.get("z2_max", 0.75))
-        z3 = float(zones.get("z3_max", 0.88))
-    except (ValueError, TypeError, AttributeError):
-        errors.append("zone boundaries must be numbers")
+    if not isinstance(zones, Mapping):
+        errors.append("zones must be an object")
     else:
-        if not (0 < z1 < z2 < z3 < 1):
-            errors.append(
-                f"zone boundaries must satisfy 0 < z1_max < z2_max < z3_max < 1, "
-                f"got z1_max={z1}, z2_max={z2}, z3_max={z3}"
-            )
+        try:
+            z1 = float(zones.get("z1_max", 0.60))
+            z2 = float(zones.get("z2_max", 0.75))
+            z3 = float(zones.get("z3_max", 0.88))
+        except (ValueError, TypeError):
+            errors.append("zone boundaries must be numbers")
+        else:
+            if not (0 < z1 < z2 < z3 < 1):
+                errors.append(
+                    f"zone boundaries must satisfy 0 < z1_max < z2_max < z3_max < 1, "
+                    f"got z1_max={z1}, z2_max={z2}, z3_max={z3}"
+                )
 
     colors = config.get("zone_colors", {})
-    for zone in ("Z1", "Z2", "Z3", "Z4"):
-        color = colors.get(zone, "")
-        if not _is_valid_hex_color(color):
-            errors.append(f"zone_colors.{zone} must be a hex string like #RRGGBB, got {color!r}")
+    if not isinstance(colors, Mapping):
+        errors.append("zone_colors must be an object")
+    else:
+        for zone in ("Z1", "Z2", "Z3", "Z4"):
+            color = colors.get(zone, "")
+            if not _is_valid_hex_color(color):
+                errors.append(
+                    f"zone_colors.{zone} must be a hex string like #RRGGBB, got {color!r}"
+                )
 
     gw = config.get("graph_window_minutes", 10)
     if not isinstance(gw, int) or gw <= 0:

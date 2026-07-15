@@ -12,6 +12,10 @@
   deltas clamped to 5 seconds per gap.
 - Add locked state snapshots for UI, graph, and export reads.
 - Add graph render caching keyed by snapshot/config changes.
+- Quarantine syntactically valid but semantically invalid configuration files
+  instead of accepting unsafe startup settings.
+- Keep save-panel failures inside the AppKit callback boundary and present
+  path-safe retry feedback for CSV write failures.
 
 ## Release Notes
 

@@ -87,6 +87,27 @@ def test_malformed_json_returns_defaults(temp_config_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "saved",
+    [
+        [],
+        {"max_hr": 0},
+        {"zones": "not-an-object"},
+        {"zone_colors": ["#888888"]},
+    ],
+)
+def test_semantically_invalid_config_is_quarantined(temp_config_path: Path, saved: object) -> None:
+    """Valid JSON cannot bypass validation and crash the menu-bar app later."""
+    temp_config_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_config_path.write_text(json.dumps(saved), encoding="utf-8")
+
+    cfg = cfg_mod.load_config(path=temp_config_path)
+
+    assert cfg == cfg_mod.DEFAULT_CONFIG
+    assert not temp_config_path.exists()
+    assert list(temp_config_path.parent.glob("config.json.corrupt*"))
+
+
 def test_empty_json_returns_defaults(temp_config_path: Path) -> None:
     temp_config_path.parent.mkdir(parents=True, exist_ok=True)
     temp_config_path.write_text("{}", encoding="utf-8")
