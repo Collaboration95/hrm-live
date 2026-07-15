@@ -401,11 +401,11 @@ checked and the evidence is linked or pasted.
 
 | Phase | Status | Commit(s) | Automated evidence | Manual/release evidence | Deviations / remaining risk |
 | --- | --- | --- | --- | --- | --- |
-| A — quality gate | complete-local | 715c6d5 + follow-up | `make check` passed locally; CI workflow added | GitHub Actions not pushed/run in this session | CI green URL pending after push |
+| A — quality gate | complete-local | 715c6d5, a2c41b6 | `make check` passed locally; CI workflow added | GitHub Actions not pushed/run in this session | CI green URL pending after push |
 | B — `src` migration | complete-local | 715c6d5 | stale-import grep clean; outside-repo import smoke passed; `make check` passed | py2app build/verify passed locally | No root runtime modules remain |
 | C — dashboard/quit | partial | 715c6d5 | shutdown coordinator and routing tests covered by import/unit suite; `make check` passed | real menu-bar duplicate-Quit reproduction and click-through checklist pending | Manual macOS UI verification still required |
-| D — save/export | complete-local | 715c6d5 + follow-up | session/export tests cover finalize, explicit destination, cancel/retry, atomic write, historical zones, delta/gap accounting, backward timestamp rejection | spreadsheet/manual Desktop CSV check pending | Automated tests use injected paths and no modal panels |
-| E — state/performance/docs | complete-local | 715c6d5 + follow-up | state stress snapshot test, graph cache path, and synchronized BLE/settings state access added; `make check` passed | sustained-stream flicker observation pending | Popover still rebuilds NSView tree, but graph rendering is cached |
+| D — save/export | complete-local | 715c6d5, a2c41b6 | session/export tests cover finalize, explicit destination, cancel/retry, atomic write, historical zones, delta/gap accounting, backward timestamp rejection | spreadsheet/manual Desktop CSV check pending | Automated tests use injected paths and no modal panels |
+| E — state/performance/docs | complete-local | 715c6d5, a2c41b6 | state stress snapshot test, graph cache path, and synchronized BLE/settings state access added; `make check` passed | sustained-stream flicker observation pending | Popover still rebuilds NSView tree, but graph rendering is cached |
 | F — bundle/release | blocked | 715c6d5 | `make build` and `make verify-bundle` passed for ad-hoc local app | `spctl --assess` failed for ad-hoc app; hardware, notarization, release publication pending | Requires Developer ID/notarization credentials, owner approval, valid `.icns` packaging, real strap test |
 
 For each completed row, add beneath the table:
