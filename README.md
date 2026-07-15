@@ -76,6 +76,7 @@ make typecheck      # Run mypy
 make test           # Run pytest
 make coverage       # Run pytest with coverage threshold
 make compile        # Compile-check Python files
+make icon           # Regenerate the packaged macOS icon
 make build          # Build dist/HRM Live.app
 make verify-bundle  # Verify an existing app bundle
 make clean          # Remove generated build/test artifacts
@@ -152,6 +153,8 @@ src/
 tests/
   ...
 docs/
+  IMPLEMENTATION_NOTES.md              # Historical coding-agent handoff evidence
+  RELEASE_CHECKLIST.md                 # Release-candidate sign-off record
   RELEASE_IMPLEMENTATION_HANDOFF.md
   RELEASE_READINESS_AUDIT_2026-07-15.md  # Current independent release status
 ```

@@ -2,9 +2,9 @@ PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
 MPLCONFIGDIR ?= /tmp/hrm-live-matplotlib
 APP_BUNDLE := dist/HRM Live.app
-COMPILE_PATHS := src tests setup.py
+COMPILE_PATHS := src tests scripts setup.py
 
-.PHONY: help venv install run format format-check lint typecheck test test-verbose coverage compile check build verify-bundle package clean
+.PHONY: help venv install run format format-check lint typecheck test test-verbose coverage compile check icon build verify-bundle package clean
 
 help:
 	@printf "HRM Live development targets:\n"
@@ -19,6 +19,7 @@ help:
 	@printf "  make test-verbose   Run the pytest suite with verbose output\n"
 	@printf "  make compile        Compile-check Python modules\n"
 	@printf "  make check          Run tests and compile-checks\n"
+	@printf "  make icon           Regenerate assets/HRMLive.icns\n"
 	@printf "  make build          Build dist/HRM Live.app with py2app\n"
 	@printf "  make verify-bundle  Verify built app signing and Info.plist metadata\n"
 	@printf "  make package        Build and verify the app bundle\n"
@@ -34,13 +35,13 @@ run:
 	$(PYTHON) -m hrm_live
 
 format:
-	$(PYTHON) -m ruff format src tests setup.py
+	$(PYTHON) -m ruff format src tests scripts setup.py
 
 format-check:
-	$(PYTHON) -m ruff format --check src tests setup.py
+	$(PYTHON) -m ruff format --check src tests scripts setup.py
 
 lint:
-	$(PYTHON) -m ruff check src tests setup.py
+	$(PYTHON) -m ruff check src tests scripts setup.py
 
 typecheck:
 	$(PYTHON) -m mypy
@@ -59,7 +60,10 @@ compile:
 
 check: format-check lint typecheck test coverage compile
 
-build:
+icon:
+	$(PYTHON) scripts/build_icon.py
+
+build: icon
 	@mkdir -p "$(MPLCONFIGDIR)"
 	MPLCONFIGDIR="$(MPLCONFIGDIR)" $(PYTHON) setup.py py2app
 
@@ -68,6 +72,7 @@ verify-bundle:
 	codesign --verify --deep --strict "$(APP_BUNDLE)"
 	codesign -d --entitlements :- "$(APP_BUNDLE)"
 	/usr/libexec/PlistBuddy -c "Print :LSUIElement" "$(APP_BUNDLE)/Contents/Info.plist"
+	@test "$$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$(APP_BUNDLE)/Contents/Info.plist")" = "HRMLive.icns"
 	/usr/libexec/PlistBuddy -c "Print :NSBluetoothAlwaysUsageDescription" "$(APP_BUNDLE)/Contents/Info.plist"
 	/usr/libexec/PlistBuddy -c "Print :NSBluetoothPeripheralUsageDescription" "$(APP_BUNDLE)/Contents/Info.plist"
 

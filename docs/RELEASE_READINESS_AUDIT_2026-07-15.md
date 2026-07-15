@@ -24,11 +24,11 @@ or public-release status.
 | --- | --- | --- |
 | Package migration exists | Verified | Runtime modules are only under `src/hrm_live`; root runtime modules were removed. |
 | Local quality gate passes | Verified | `make check`: Ruff format/lint, mypy, 115 pytest tests, coverage, and compileall all passed. |
-| Coverage requirement passes | Verified, but weak | Current run: **57.30%** against a **54%** threshold. Core UI files remain lightly covered (`menubar` 30%, `popover` 38%, `settings` 39%). |
+| Coverage requirement passes | Verified, but weak | Current run: **57.47%** against a **54%** threshold. Core UI files remain lightly covered (`menubar` 30%, `popover` 38%, `settings` 39%). |
 | Explicit CSV writer exists | Verified | `finalize_session`, `export_session_csv`, sibling-temp-file replacement, captured zones, and timestamp-gap clamping are present. |
 | Bundle builds and is internally signed | Verified only for development | `make verify-bundle` passed. `codesign -dv` reports `Signature=adhoc`, no TeamIdentifier. |
 | Bundle is a trusted distributable app | Not verified / false | `spctl --assess --type execute --verbose` fails with `internal error in Code Signing subsystem`; ad-hoc signing is not a public-release signature. |
-| App icon is bundled | False | Built `Info.plist` reports `CFBundleIconFile = PythonApplet.icns`; `setup.py` sets `iconfile = None`. `iconutil` rejects the supplied iconset. |
+| App icon is bundled | Verified for development | Reproducible `scripts/build_icon.py` creates `assets/HRMLive.icns`; the built bundle contains it and `CFBundleIconFile = HRMLive.icns`. |
 | CI is green | Unverified | Workflow exists but has not run on GitHub because no push was requested. |
 | Manual UI and real-HRM behavior | Unverified | No recorded interactive launch, menu-bar, save-panel, or hardware test evidence. |
 
@@ -168,21 +168,21 @@ Record macOS, app version, Python version, strap model, firmware (if visible),
 date, tester, and result. A failed manual case is a release blocker until
 fixed and re-tested.
 
-### P1.2 Valid project icon
+### P1.2 Valid project icon — resolved locally
 
-The icon source PNGs have the expected nominal dimensions, but this command
-currently fails:
+The original `iconutil` conversion from `assets/HRMLive.iconset` was rejected
+as `Invalid Iconset`, so the initial development bundle used the default
+Python app icon. This is resolved locally without relying on that conversion:
+`scripts/build_icon.py` uses Pillow to generate the valid, project-owned
+`assets/HRMLive.icns` from the existing 1024px source artwork. The build extra
+declares Pillow, py2app consumes that `.icns`, and `make verify-bundle` asserts
+that `CFBundleIconFile` is `HRMLive.icns`.
 
-```bash
-iconutil -c icns assets/HRMLive.iconset -o /private/tmp/HRMLive.icns
-# assets/HRMLive.iconset:Invalid Iconset.
-```
-
-The app consequently uses `PythonApplet.icns`. Regenerate a valid,
-project-owned `.icns` from a licensed source image using a reproducible tool
-and verify it with `iconutil` before setting `OPTIONS['iconfile']`. Add a
-bundle assertion that `CFBundleIconFile` is the project icon rather than
-`PythonApplet.icns`. Do not ship the default Python app icon.
+**Verification recorded.** `file assets/HRMLive.icns` and the copy in the
+built bundle report a macOS icon with an ICNS table of contents. `make build &&
+make verify-bundle` passed with a valid ad-hoc code signature and sealed
+resources. This resolves the default-icon defect; it does not make the
+ad-hoc bundle trusted for public distribution (P1.3 still applies).
 
 ### P1.3 Trusted distribution artifact
 
@@ -232,14 +232,12 @@ and hosted CI remain owner-managed external work.
 
 ## P2 — documentation and quality-debt cleanup
 
-1. `Implementation_notes.md` is at the repository root even though release
-   issues belong under `docs/`. Move its retained historical evidence into
-   `docs/` or replace it with a short pointer to this audit; do not leave two
-   divergent sources of release status.
-2. `docs/RELEASE_IMPLEMENTATION_HANDOFF.md` still begins with a planning-only
-   status and an initial audit describing the pre-implementation code as
-   current, while its later ledger says work was completed. Mark it clearly as
-   historical/superseded and point to this audit as the current status.
+1. Preserve the coding-agent implementation record in `docs/` as historical
+   evidence only. The independent audit is the single current release-status
+   source; do not let historical test counts or resolved defects be read as
+   current evidence.
+2. Keep `docs/RELEASE_IMPLEMENTATION_HANDOFF.md` clearly marked as a
+   historical implementation contract and point readers to this audit.
 3. Raise test coverage after P0 fixes, focusing on `menubar`, `popover`, and
    `settings`. The current 54% floor passes but is insufficient evidence for
    UI-heavy release behavior. Set a new threshold only after adding meaningful
@@ -257,8 +255,9 @@ and hosted CI remain owner-managed external work.
    add the focused tests described above.
 3. **Run `make check`** and update this audit plus the handoff ledger with the
    new commit, exact command output, and remaining manual evidence.
-4. **P1 icon patch:** generate/validate a real `.icns`, wire it into py2app,
-   rebuild, and assert its bundle metadata.
+4. **P1 icon patch (complete locally):** the reproducible `.icns` is wired
+   into py2app and bundle metadata is asserted. Keep this check in every
+   release-candidate build.
 5. **P1 manual candidate test:** complete and record every manual/hardware
    case. Resolve failures rather than marking them “deferred.”
 6. **P2 GitHub activation:** enable the committed community templates,
@@ -278,15 +277,15 @@ and hosted CI remain owner-managed external work.
 - P0 code changes: status-item lifecycle, retained `NSObject` action bridge,
   default Quit removal, export error feedback, and successful-export cleanup.
 - Focused tests: 32 passed (`tests/test_imports.py`, `tests/test_session.py`).
-- Full local quality gate: 115 passed; Ruff, mypy, coverage (**57.30%**), and
+- Full local quality gate: 115 passed; Ruff, mypy, coverage (**57.47%**), and
   compileall passed.
 - Local OSS repository artifacts: contribution, security, conduct, support,
   issue/PR templates, and Dependabot configuration were added.
-- Local package rebuild: `make build && make verify-bundle` passed after the
-  P0 changes. It remains ad-hoc signed and is not a distributable artifact.
+- Local package rebuild: `make build && make verify-bundle` passed with the
+  generated `HRMLive.icns`, a valid ad-hoc signature, sealed resources, and
+  expected Info.plist metadata. It remains an untrusted development artifact.
 - Remaining blockers are P1/P2 items in this document, especially real AppKit
-  and hardware verification, a valid project icon, green hosted CI, and
-  Developer ID/notarization.
+  and hardware verification, green hosted CI, and Developer ID/notarization.
 
 ## Completion evidence required to change the verdict
 

@@ -1,6 +1,6 @@
 # Implementation Notes
 
-> Historical implementation record. The current independent release decision,
+> Historical coding-agent implementation record. The current independent release decision,
 > P0 defects, and ordered remediation plan are in
 > [`docs/RELEASE_READINESS_AUDIT_2026-07-15.md`](docs/RELEASE_READINESS_AUDIT_2026-07-15.md).
 > This file must not be used as evidence that the app is release-ready.
@@ -90,9 +90,9 @@ Bundle verification:
   ad-hoc local bundle with `internal error in Code Signing subsystem`.
 - Developer ID signing, notarization, stapling, checksum, and publication
   authorization are missing.
-- Generated project-owned icon PNG sources exist under
-  `assets/HRMLive.iconset`, but `iconutil` rejected them as `Invalid Iconset`;
-  the bundle is therefore still using the default icon.
+- The original `iconutil` conversion from `assets/HRMLive.iconset` failed;
+  this historical record predates the later reproducible Pillow-based
+  `assets/HRMLive.icns` fix. Consult the current audit for its verification.
 - The popover still rebuilds the NSView tree during refresh. Graph rendering is
   cached, but full incremental AppKit view updates remain future hardening.
 
@@ -114,5 +114,5 @@ was spawned and reported:
 - Icon, warning suppression, and docs/release-state issues remained.
 
 The first three code issues and the warning/docs issues were fixed in the
-follow-up pass. The icon remains a Phase F blocker because `iconutil` rejects
-the generated iconset in this environment.
+follow-up pass. This record predates the later icon-packaging fix; the current
+audit records the authoritative remaining blockers.

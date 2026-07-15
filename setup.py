@@ -66,7 +66,7 @@ OPTIONS = {
     ],
     "matplotlib_backends": ["agg"],
     "site_packages": True,
-    "iconfile": None,  # Use a default icon; can be set later
+    "iconfile": "assets/HRMLive.icns",
     "emulate_shell_environment": True,
     "resources": [],
 }

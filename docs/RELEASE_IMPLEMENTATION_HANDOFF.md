@@ -1,15 +1,20 @@
 # HRM Live release implementation handoff
 
-**Status:** planning only — no product code, bundle, release, or remote
-publication is created by this document.
+> **Historical implementation contract and ledger.** This document describes
+> the coding-agent handoff that began from the pre-implementation repository.
+> Its opening audit and phase evidence intentionally preserve that historical
+> state and must not be read as the current product/release decision. For the
+> current independently verified status, open
+> [`RELEASE_READINESS_AUDIT_2026-07-15.md`](RELEASE_READINESS_AUDIT_2026-07-15.md).
+> No remote publication was performed by this handoff.
 
 **Audience:** a coding model implementing the next release, and a future
 auditor reviewing its result.
 
-**Source of truth:** the current repository and the four items under
-`README.md` → **Feature Tracking**. If this document and the README differ,
-this document defines the implementation and verification details; update the
-README only after the matching work has passed its acceptance checks.
+**Historical source of truth:** the repository and the four items that were
+under `README.md` → **Feature Tracking** when this implementation contract was
+written. The release-readiness audit above supersedes this document when it
+disagrees with current code or current release evidence.
 
 ## 1. Audit snapshot
 
