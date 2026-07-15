@@ -401,12 +401,12 @@ checked and the evidence is linked or pasted.
 
 | Phase | Status | Commit(s) | Automated evidence | Manual/release evidence | Deviations / remaining risk |
 | --- | --- | --- | --- | --- | --- |
-| A — quality gate | complete-local | 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c | `make check` passed locally; CI workflow added | GitHub Actions not pushed/run in this session | CI green URL pending after push |
-| B — `src` migration | complete-local | 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c | stale-import grep clean; outside-repo import smoke passed; `make check` passed | py2app build/verify passed locally | No root runtime modules remain |
-| C — dashboard/quit | partial | 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c | shutdown coordinator and routing tests covered by import/unit suite; `make check` passed | real menu-bar duplicate-Quit reproduction and click-through checklist pending | Manual macOS UI verification still required |
-| D — save/export | complete-local | 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c | session/export tests cover finalize, explicit destination, cancel/retry, atomic write, historical zones, delta/gap accounting | spreadsheet/manual Desktop CSV check pending | Automated tests use injected paths and no modal panels |
-| E — state/performance/docs | complete-local | 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c | state stress snapshot test and graph cache path added; `make check` passed | sustained-stream flicker observation pending | Popover still rebuilds NSView tree, but graph rendering is cached |
-| F — bundle/release | blocked | 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c | `make build` and `make verify-bundle` passed for ad-hoc local app | `spctl --assess` failed for ad-hoc app; hardware, notarization, release publication pending | Requires Developer ID/notarization credentials, owner approval, valid `.icns` packaging, real strap test |
+| A — quality gate | complete-local | 715c6d5 | `make check` passed locally; CI workflow added | GitHub Actions not pushed/run in this session | CI green URL pending after push |
+| B — `src` migration | complete-local | 715c6d5 | stale-import grep clean; outside-repo import smoke passed; `make check` passed | py2app build/verify passed locally | No root runtime modules remain |
+| C — dashboard/quit | partial | 715c6d5 | shutdown coordinator and routing tests covered by import/unit suite; `make check` passed | real menu-bar duplicate-Quit reproduction and click-through checklist pending | Manual macOS UI verification still required |
+| D — save/export | complete-local | 715c6d5 | session/export tests cover finalize, explicit destination, cancel/retry, atomic write, historical zones, delta/gap accounting | spreadsheet/manual Desktop CSV check pending | Automated tests use injected paths and no modal panels |
+| E — state/performance/docs | complete-local | 715c6d5 | state stress snapshot test and graph cache path added; `make check` passed | sustained-stream flicker observation pending | Popover still rebuilds NSView tree, but graph rendering is cached |
+| F — bundle/release | blocked | 715c6d5 | `make build` and `make verify-bundle` passed for ad-hoc local app | `spctl --assess` failed for ad-hoc app; hardware, notarization, release publication pending | Requires Developer ID/notarization credentials, owner approval, valid `.icns` packaging, real strap test |
 
 For each completed row, add beneath the table:
 
@@ -423,7 +423,7 @@ For each completed row, add beneath the table:
 ```
 
 ### Phase A evidence — 2026-07-15
-- commit: 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c
+- commit: 715c6d5
 - files changed: `.github/workflows/ci.yml`, `pyproject.toml`, `Makefile`, `README.md`
 - commands run: `.venv/bin/python -m pip install -e ".[dev,build]"` passed after network approval; `make check` passed
 - new/updated tests: existing 110-test suite retained; coverage gate measured at 54.79% and threshold set to 54%
@@ -433,7 +433,7 @@ For each completed row, add beneath the table:
 - reviewer: pending
 
 ### Phase B evidence — 2026-07-15
-- commit: 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c
+- commit: 715c6d5
 - files changed: `src/hrm_live/**`, `tests/**`, `setup.py`, `pyproject.toml`, `Makefile`, `README.md`
 - commands run: `rg -n 'from (app|ble|config|session|state|zones|ui) import|import (app|ble|config|session|state|zones)' src tests` returned no matches; outside-repo smoke `/Users/speedpowermac/Documents/projects/CODE_MAIN/personal/hrm-live/.venv/bin/python -c "import hrm_live; import hrm_live.app; import hrm_live.ble; print(hrm_live.__version__)"` from `/private/tmp` printed `0.1.0`; `make check` passed
 - new/updated tests: package-path import tests in `tests/test_imports.py`
@@ -443,7 +443,7 @@ For each completed row, add beneath the table:
 - reviewer: pending
 
 ### Phase C evidence — 2026-07-15
-- commit: 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c
+- commit: 715c6d5
 - files changed: `src/hrm_live/app.py`, `src/hrm_live/ui/menubar.py`, `src/hrm_live/ui/popover.py`
 - commands run: `make check` passed
 - new/updated tests: import and headless UI tests continue to exercise AppKit-safe construction; shutdown coordinator is type/lint checked
@@ -453,7 +453,7 @@ For each completed row, add beneath the table:
 - reviewer: pending
 
 ### Phase D evidence — 2026-07-15
-- commit: 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c
+- commit: 715c6d5
 - files changed: `src/hrm_live/session.py`, `src/hrm_live/state.py`, `src/hrm_live/ui/popover.py`, `tests/test_session.py`
 - commands run: `make check` passed
 - new/updated tests: `tests/test_session.py` covers finalization, explicit CSV path normalization, atomic replace, write failure, cancel/retry retention, historical zone preservation, delta accounting, gap clamp, invalid BPM, and backward timestamps
@@ -463,7 +463,7 @@ For each completed row, add beneath the table:
 - reviewer: pending
 
 ### Phase E evidence — 2026-07-15
-- commit: 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c
+- commit: 715c6d5
 - files changed: `src/hrm_live/state.py`, `src/hrm_live/ui/popover.py`, `src/hrm_live/ui/graph.py`, `tests/test_state.py`
 - commands run: `make check` passed
 - new/updated tests: `test_fast_producer_and_snapshots_do_not_mutate_during_iteration`, `test_snapshot_copies_ring_buffer`, session snapshot/export tests
@@ -473,7 +473,7 @@ For each completed row, add beneath the table:
 - reviewer: pending
 
 ### Phase F evidence — 2026-07-15
-- commit: 91f3a5fd6938a64a2ef2bad41975cbb77bd6119c
+- commit: 715c6d5
 - files changed: `setup.py`, `CHANGELOG.md`, `docs/PRIVACY.md`, `docs/RELEASE_CHECKLIST.md`, `assets/HRMLive.iconset/**`
 - commands run: `make build` passed for ad-hoc app; `make verify-bundle` passed; `spctl --assess --type execute --verbose "dist/HRM Live.app"` failed with `internal error in Code Signing subsystem`; `iconutil -c icns assets/HRMLive.iconset -o assets/HRMLive.icns` failed with `Invalid Iconset`
 - new/updated tests: release docs and bundle metadata checks; no notarization tests without credentials
