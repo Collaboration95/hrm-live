@@ -17,8 +17,6 @@ Boundary semantics:
 
 from __future__ import annotations
 
-from typing import Any
-
 # ── Zone constants ───────────────────────────────────────────────────────
 
 ZONE_LABELS: dict[str, str] = {
@@ -39,6 +37,7 @@ ZONE_ORDER = ["Z1", "Z2", "Z3", "Z4"]
 
 
 # ── Public API ───────────────────────────────────────────────────────────
+
 
 def get_zone(bpm: int, max_hr: int, zones: dict[str, float]) -> str:
     """Return the zone string (``Z1``–``Z4``) for *bpm*.
@@ -91,8 +90,8 @@ def validate_zones(zones: dict[str, float]) -> None:
         z1 = float(zones.get("z1_max", 0.60))
         z2 = float(zones.get("z2_max", 0.75))
         z3 = float(zones.get("z3_max", 0.88))
-    except (ValueError, TypeError, AttributeError):
-        raise ValueError("zone boundaries must be numbers")
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("zone boundaries must be numbers") from exc
 
     if not (0 < z1 < z2 < z3 < 1):
         raise ValueError(

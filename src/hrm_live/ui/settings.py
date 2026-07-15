@@ -26,9 +26,9 @@ from AppKit import (
     NSWindowStyleMaskTitled,
 )
 
-import config as cfg_mod
-from state import AppState, DiscoveredDevice
-from zones import DEFAULT_COLORS, ZONE_ORDER, validate_zones
+import hrm_live.config as cfg_mod
+from hrm_live.state import AppState, DiscoveredDevice
+from hrm_live.zones import DEFAULT_COLORS, ZONE_ORDER, validate_zones
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ class SettingsWindow:
 
         self._build_panel()
         self.refresh_from_state(force=True)
+        assert self._panel is not None
         self._panel.makeKeyAndOrderFront_(None)
 
     def close(self) -> None:
@@ -254,7 +255,7 @@ class SettingsWindow:
             self.refresh_from_state()
         except Exception as exc:
             log.exception("Scan action failed")
-            self._show_error("Scan failed: %s" % exc)
+            self._show_error(f"Scan failed: {exc}")
 
     def scan_result_selected_(self, sender: Any) -> None:
         try:
@@ -274,9 +275,7 @@ class SettingsWindow:
             self._selected_scan_address = result.address
             self._controls["device_address"].setStringValue_(result.address)
             self._controls["device_name"].setStringValue_(result.name)
-            self._set_status_text(
-                f"Selected {_display_name(result)} — click Save to connect."
-            )
+            self._set_status_text(f"Selected {_display_name(result)} — click Save to connect.")
         except Exception as exc:
             log.exception("Failed to apply selected scan result")
             self._show_error(f"Failed to use the selected device: {exc}")
@@ -452,15 +451,15 @@ class SettingsWindow:
 
         try:
             max_hr = int(c["max_hr"].stringValue())
-        except (ValueError, AttributeError, KeyError):
-            raise ValueError("Max HR must be a valid integer")
+        except (ValueError, AttributeError, KeyError) as exc:
+            raise ValueError("Max HR must be a valid integer") from exc
 
         try:
             z1_pct = float(c["zone_z1_max"].stringValue()) / 100.0
             z2_pct = float(c["zone_z2_max"].stringValue()) / 100.0
             z3_pct = float(c["zone_z3_max"].stringValue()) / 100.0
-        except (ValueError, AttributeError, KeyError):
-            raise ValueError("Zone boundaries must be valid numbers")
+        except (ValueError, AttributeError, KeyError) as exc:
+            raise ValueError("Zone boundaries must be valid numbers") from exc
 
         validate_zones({"z1_max": z1_pct, "z2_max": z2_pct, "z3_max": z3_pct})
 
@@ -474,8 +473,8 @@ class SettingsWindow:
 
         try:
             graph_window = int(c["graph_window"].stringValue())
-        except (ValueError, AttributeError, KeyError):
-            raise ValueError("Graph window must be a valid integer")
+        except (ValueError, AttributeError, KeyError) as exc:
+            raise ValueError("Graph window must be a valid integer") from exc
 
         base["device_address"] = device_address
         base["device_name"] = device_name

@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Callable, Iterable
+from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Iterable
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from bleak import BleakClient, BleakScanner
@@ -19,8 +21,7 @@ from bleak.exc import (
     BleakError,
 )
 
-from session import record_sample
-from state import AppState, DiscoveredDevice
+from hrm_live.state import AppState, DiscoveredDevice
 
 log = logging.getLogger(__name__)
 
@@ -64,11 +65,9 @@ def _make_callback(state: AppState) -> Callable[[int, bytearray], None]:
             log.warning("Ignored malformed HR payload: %s", data.hex())
             return
 
-        now = datetime.now(timezone.utc)
-        state.latest_bpm = bpm
-        state.ring_buffer.append((now, bpm))
-        if state.session_active:
-            record_sample(state, now, bpm)
+        now = datetime.now(UTC)
+        if not state.record_bpm(now, bpm):
+            log.warning("Ignored out-of-range BPM: %d", bpm)
 
     return _callback
 
@@ -245,9 +244,7 @@ async def ble_loop(
                 state.connected = True
                 state.connection_status = "connected"
                 state.connection_error = None
-                while client.is_connected and (
-                    stop_event is None or not stop_event.is_set()
-                ):
+                while client.is_connected and (stop_event is None or not stop_event.is_set()):
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
             raise
@@ -256,7 +253,7 @@ async def ble_loop(
             log.warning("BLE unavailable: %s", message)
             state.connection_status = "error"
             state.connection_error = message
-        except (BleakError, OSError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, BleakError, OSError) as exc:
             log.warning("BLE error: %s", exc)
             state.connection_status = "error"
             state.connection_error = connection_failure_message(exc)
@@ -390,17 +387,13 @@ class BLEManager:
                     return
                 self.loop.create_task(self._shutdown_async())  # type: ignore[union-attr]
 
-            try:
+            with suppress(RuntimeError):
                 self.loop.call_soon_threadsafe(_queue)  # type: ignore[union-attr]
-            except RuntimeError:
-                pass
 
         if self.thread is not None and self.thread.is_alive():
             self.thread.join(timeout=join_timeout)
             if self.thread.is_alive():
-                log.warning(
-                    "BLE thread did not stop within %.1f seconds", join_timeout
-                )
+                log.warning("BLE thread did not stop within %.1f seconds", join_timeout)
 
     def get_cached_device(self, address: str) -> BLEDevice | None:
         """Return the last BLEDevice object seen for *address*."""
@@ -426,9 +419,7 @@ class BLEManager:
                 for task in pending:
                     task.cancel()
                 if pending:
-                    loop.run_until_complete(
-                        asyncio.gather(*pending, return_exceptions=True)
-                    )
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             except Exception:
                 log.debug("BLE loop cleanup failed", exc_info=True)
             finally:
@@ -551,7 +542,7 @@ class BLEManager:
             self.state.scan_status = "error"
             self.state.scan_error = message
             self.state.scan_generation += 1
-        except (BleakError, OSError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, BleakError, OSError) as exc:
             log.warning("BLE scan error: %s", exc)
             self.state.scan_status = "error"
             self.state.scan_error = scan_failure_message(exc)
@@ -630,7 +621,7 @@ class BLEManager:
                     log.warning("BLE unavailable: %s", message)
                     self.state.connection_status = "error"
                     self.state.connection_error = message
-                except (BleakError, OSError, asyncio.TimeoutError) as exc:
+                except (TimeoutError, BleakError, OSError) as exc:
                     message = connection_failure_message(exc)
                     log.warning("BLE error: %s", exc)
                     self.state.connection_status = "error"

@@ -8,7 +8,8 @@ import pytest
 
 def test_import_state() -> None:
     """State module imports cleanly."""
-    import state
+    import hrm_live.state as state
+
     # Verify no side effects — instantiate dataclass
     s = state.AppState()
     assert s.latest_bpm is None
@@ -20,49 +21,61 @@ def test_import_state() -> None:
 
 def test_import_zones() -> None:
     """Zones module imports cleanly."""
-    import zones
+    import hrm_live.zones as zones
+
+    assert zones.zone_label("Z1") == "Recovery"
 
 
 def test_import_config() -> None:
     """Config module imports without loading files."""
-    import config
+    import hrm_live.config as config
+
     # Ensure no file I/O happens at import; load is explicit
     assert hasattr(config, "load_config")
 
 
 def test_import_session() -> None:
     """Session module imports cleanly."""
-    import session
+    import hrm_live.session as session
+
+    assert session.suggested_csv_filename().endswith(".csv")
 
 
 def test_import_ble_no_bluetooth() -> None:
     """BLE module imports without Bluetooth hardware."""
-    import ble
+    import hrm_live.ble as ble
+
     assert ble.HEART_RATE_UUID == "00002a37-0000-1000-8000-00805f9b34fb"
 
 
 def test_import_ui_package() -> None:
     """UI package imports cleanly."""
-    import ui
+    import hrm_live.ui as ui
+
+    assert ui.__doc__
 
 
 def test_import_menubar() -> None:
     """Menubar module may require macOS; skip if not available."""
     try:
-        import ui.menubar
+        import hrm_live.ui.menubar as menubar
     except (ImportError, RuntimeError) as exc:
         pytest.skip(f"ui.menubar import failed (expected on non-macOS): {exc}")
+    assert menubar.DISCONNECTED_TITLE
 
 
 def test_import_popover() -> None:
     """Popover module imports cleanly."""
-    import ui.popover
+    import hrm_live.ui.popover as popover
+
+    assert popover.POPOVER_WIDTH > 0
 
 
 def test_dark_button_title_helper_sets_accessible_white_titles() -> None:
     """Popover helper keeps dark buttons readable."""
     from AppKit import NSForegroundColorAttributeName
-    from ui.popover import _set_dark_button_title
+
+    from hrm_live.ui.popover import _set_dark_button_title
 
     class FakeButton:
         def __init__(self) -> None:
@@ -94,8 +107,8 @@ def test_dark_button_title_helper_sets_accessible_white_titles() -> None:
 
 def test_popover_view_builds_without_appkit_abort() -> None:
     """Headless popover content avoids controls that require NSApplication."""
-    from state import AppState
-    from ui.popover import HRMPopover
+    from hrm_live.state import AppState
+    from hrm_live.ui.popover import HRMPopover
 
     popover = HRMPopover(AppState())
     view = popover._build_view()
@@ -106,8 +119,8 @@ def test_popover_view_builds_without_appkit_abort() -> None:
 
 def test_settings_panel_headless_guard() -> None:
     """Settings panel fails safely instead of aborting without NSApplication."""
-    from state import AppState
-    from ui.settings import SettingsWindow
+    from hrm_live.state import AppState
+    from hrm_live.ui.settings import SettingsWindow
 
     with pytest.raises(RuntimeError, match="NSApplication"):
         SettingsWindow(AppState())._build_panel()
@@ -115,8 +128,8 @@ def test_settings_panel_headless_guard() -> None:
 
 def test_settings_scan_callbacks_use_injected_functions() -> None:
     """Settings actions delegate scan work to injected callbacks."""
-    from state import AppState, DiscoveredDevice
-    from ui.settings import SettingsWindow
+    from hrm_live.state import AppState, DiscoveredDevice
+    from hrm_live.ui.settings import SettingsWindow
 
     calls: list[str] = []
 
@@ -175,9 +188,7 @@ def test_settings_scan_callbacks_use_injected_functions() -> None:
 
     state = AppState()
     state.scan_status = "scanning"
-    state.scan_results = (
-        DiscoveredDevice("ADDR-1", "Polar H10", -48, True),
-    )
+    state.scan_results = (DiscoveredDevice("ADDR-1", "Polar H10", -48, True),)
     window = SettingsWindow(
         state,
         on_scan=lambda: calls.append("scan"),
@@ -223,18 +234,23 @@ def test_settings_scan_callbacks_use_injected_functions() -> None:
 
 def test_import_graph() -> None:
     """Graph module imports cleanly (requires matplotlib)."""
-    import ui.graph
+    import hrm_live.ui.graph as graph
+
+    assert graph.render_graph
 
 
 def test_import_settings() -> None:
     """Settings module imports cleanly."""
-    import ui.settings
+    import hrm_live.ui.settings as settings
+
+    assert settings.PANEL_WIDTH > 0
 
 
 def test_compile_all() -> None:
     """All Python files in the project compile without errors."""
-    import py_compile
     import os
+    import py_compile
+
     errors = []
     for root, dirs, files in os.walk("."):
         # Skip hidden dirs and venvs
@@ -246,4 +262,4 @@ def test_compile_all() -> None:
                     py_compile.compile(path, doraise=True)
                 except py_compile.PyCompileError as exc:
                     errors.append(str(exc))
-    assert not errors, f"Compilation errors:\n" + "\n".join(errors)
+    assert not errors, "Compilation errors:\n" + "\n".join(errors)

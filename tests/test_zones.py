@@ -2,15 +2,12 @@
 
 import pytest
 
-from zones import (
+from hrm_live.zones import (
     get_zone,
+    validate_zones,
     zone_color,
     zone_label,
-    validate_zones,
-    DEFAULT_COLORS,
-    ZONE_LABELS,
 )
-
 
 # ── Zone calculation ────────────────────────────────────────────────────
 
@@ -83,6 +80,7 @@ def test_zone_negative_bpm() -> None:
 
 # ── Zone colors ─────────────────────────────────────────────────────────
 
+
 def test_zone_color_default() -> None:
     assert zone_color("Z1") == "#888888"
     assert zone_color("Z2") == "#4CAF50"
@@ -106,6 +104,7 @@ def test_zone_color_none_colors() -> None:
 
 # ── Zone labels ─────────────────────────────────────────────────────────
 
+
 def test_zone_label_known() -> None:
     assert zone_label("Z1") == "Recovery"
     assert zone_label("Z2") == "Aerobic"
@@ -118,6 +117,7 @@ def test_zone_label_unknown() -> None:
 
 
 # ── Validation ──────────────────────────────────────────────────────────
+
 
 def test_validate_zones_valid() -> None:
     # Should not raise

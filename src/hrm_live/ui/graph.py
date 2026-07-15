@@ -16,22 +16,19 @@ import io
 import logging
 import os
 import tempfile
-from collections import deque
-from datetime import datetime, timedelta, timezone
+from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 _MPLCONFIGDIR = Path(tempfile.gettempdir()) / "hrm-live-matplotlib"
 _MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(_MPLCONFIGDIR))
 
 import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.patches import FancyBboxPatch
 
-from zones import ZONE_ORDER
+matplotlib.use("Agg")
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +43,7 @@ _DEFAULT_ZONES = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
 
 
 def render_graph(
-    ring_buffer: deque,
+    ring_buffer: Sequence,
     max_hr: int = 190,
     window_minutes: int = 10,
     zones: dict[str, float] | None = None,
@@ -103,14 +100,30 @@ def render_graph(
     ax.set_facecolor("#1e1e1e")
 
     # Zone bands (fill between)
-    ax.axhspan(0, z1_bpm, facecolor=zone_colors.get("Z1", _ZONE_BAND_COLORS["Z1"]),
-               alpha=0.25, zorder=0)
-    ax.axhspan(z1_bpm, z2_bpm, facecolor=zone_colors.get("Z2", _ZONE_BAND_COLORS["Z2"]),
-               alpha=0.25, zorder=0)
-    ax.axhspan(z2_bpm, z3_bpm, facecolor=zone_colors.get("Z3", _ZONE_BAND_COLORS["Z3"]),
-               alpha=0.25, zorder=0)
-    ax.axhspan(z3_bpm, max_hr * 1.15, facecolor=zone_colors.get("Z4", _ZONE_BAND_COLORS["Z4"]),
-               alpha=0.25, zorder=0)
+    ax.axhspan(
+        0, z1_bpm, facecolor=zone_colors.get("Z1", _ZONE_BAND_COLORS["Z1"]), alpha=0.25, zorder=0
+    )
+    ax.axhspan(
+        z1_bpm,
+        z2_bpm,
+        facecolor=zone_colors.get("Z2", _ZONE_BAND_COLORS["Z2"]),
+        alpha=0.25,
+        zorder=0,
+    )
+    ax.axhspan(
+        z2_bpm,
+        z3_bpm,
+        facecolor=zone_colors.get("Z3", _ZONE_BAND_COLORS["Z3"]),
+        alpha=0.25,
+        zorder=0,
+    )
+    ax.axhspan(
+        z3_bpm,
+        max_hr * 1.15,
+        facecolor=zone_colors.get("Z4", _ZONE_BAND_COLORS["Z4"]),
+        alpha=0.25,
+        zorder=0,
+    )
 
     # Zone boundary lines (dashed)
     for bpm_val, color in [(z1_bpm, "#888888"), (z2_bpm, "#888888"), (z3_bpm, "#888888")]:

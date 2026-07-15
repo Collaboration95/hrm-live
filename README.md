@@ -11,13 +11,13 @@ with a zone gauge, HR graph, and session recording.
   graph, session stats, and start/stop controls
 - **BLE HRM support** for standard GATT Heart Rate Measurement (0x2A37)
 - **4-zone model** with configurable boundaries and colors
-- **Session recording** with CSV export
+- **Session recording** with user-selected CSV export
 - **Configurable settings** (max HR, zone boundaries, colors, graph window)
 
 ## Requirements
 
 - macOS 12+ (Monterey or later)
-- Python 3.11+
+- Python 3.11+ for runtime; release CI tests Python 3.11 and 3.12.
 - A BLE heart rate monitor strap (optional — app works in disconnected mode)
 
 ## Installation
@@ -70,7 +70,11 @@ Useful Makefile targets:
 
 ```bash
 make help           # Show all available targets
+make format-check   # Check Ruff formatting
+make lint           # Run Ruff lint
+make typecheck      # Run mypy
 make test           # Run pytest
+make coverage       # Run pytest with coverage threshold
 make compile        # Compile-check Python files
 make build          # Build dist/HRM Live.app
 make verify-bundle  # Verify an existing app bundle
@@ -94,9 +98,11 @@ make test-verbose
 With coverage:
 
 ```bash
-pip install pytest-cov
-pytest --cov=. --cov-report=term-missing
+make coverage
 ```
+
+The current initial coverage gate is 54%, measured after adding AppKit-safe
+unit tests and before deeper UI automation.
 
 ## Configuration
 
@@ -110,7 +116,14 @@ Default settings:
 
 ## Session Data
 
-Recorded sessions are saved as CSV files in `~/.local/share/hrm/sessions/`.
+Stopping a non-empty session opens a Finder save dialog. No CSV is written
+until you choose a destination. Cancelling keeps the completed session in
+memory and exposes `Save Last Session...` until a new session starts.
+
+Session duration is based on timestamp deltas between valid heart-rate
+samples, assigned to the previous sample's zone. A single notification gap is
+clamped to 5 seconds so disconnects or sleep do not create inflated workout
+durations. The first sample adds zero seconds.
 
 Format:
 ```csv
@@ -121,25 +134,40 @@ timestamp,bpm,zone
 ## Project Structure
 
 ```
-app.py              # Entry point
-state.py            # Shared AppState dataclass
-config.py           # Config load/save/validate
-zones.py            # Zone calculation helpers
-session.py          # Session management & CSV export
-ble.py              # BLE HR parsing & connection loop
-ui/
-  __init__.py
-  menubar.py        # rumps.App subclass
-  popover.py        # Popover dashboard
-  graph.py          # HR graph rendering (matplotlib)
-  settings.py       # Settings window
+src/
+  hrm_live/
+    __init__.py
+    __main__.py     # python -m hrm_live
+    app.py          # Composition root and shutdown coordinator
+    state.py        # Locked AppState and immutable snapshots
+    config.py       # Config load/save/validate
+    zones.py        # Zone calculation helpers
+    session.py      # Session lifecycle and explicit CSV export
+    ble.py          # BLE HR parsing and connection loop
+    ui/
+      menubar.py    # Status item and shutdown routing
+      popover.py    # Dashboard and save-panel orchestration
+      graph.py      # HR graph rendering (matplotlib Agg)
+      settings.py   # Settings window
 tests/
   ...
 docs/
-  SPEC.md
-  PHASED_IMPLEMENTATION_PROMPT.md
-  IMPLEMENTATION_STATUS.md
+  RELEASE_IMPLEMENTATION_HANDOFF.md
 ```
+
+## Privacy And Limitations
+
+HRM Live keeps Bluetooth readings, settings, and session data local to your
+Mac unless you explicitly export a CSV. The app is for fitness display and
+record keeping only; it is not a medical device and does not promise medical
+accuracy.
+
+## Release Status
+
+Local ad-hoc `.app` builds are supported for development. Public distribution
+requires a Developer ID Application certificate, notarization, stapling, a
+checksum, and explicit GitHub release authorization. Those credentials are not
+stored in this repository.
 
 ## License
 
@@ -147,16 +175,11 @@ MIT
 
 ## Feature Tracking
 
-Planned follow-up work for the app:
+Release tracker:
 
-1. Fix the double quit button bug, or unify the quit behavior if the two
-   controls are intended to do the same thing.
-2. Plan CSV saving through a standard Finder-style save dialog instead of
-   writing session data to a fixed random location.
-3. Change the default popover behavior so the dashboard opens first on click,
-   with settings and quit actions moved to the bottom as secondary controls.
-4. Improve code cleanliness by moving implementation code into `src/` and
-   adding proper comments where they clarify non-obvious logic.
-
-These items are documentation-only for now and should be tracked before the
-next implementation pass.
+1. Dashboard-first status item interaction: implemented; manual real-UI
+   verification still pending.
+2. Finder-style CSV saving: implemented with cancel/retry and atomic writes.
+3. Single guarded quit path: implemented; manual real-UI verification still
+   pending for all BLE states.
+4. Native `src/hrm_live` package layout and focused comments: implemented.

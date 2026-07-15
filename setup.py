@@ -1,5 +1,4 @@
-"""
-py2app build configuration for HRM Live.app
+"""py2app build configuration for HRM Live.app.
 
 Build command:
     python setup.py py2app
@@ -7,15 +6,23 @@ Build command:
 The .app bundle will be created in dist/HRM Live.app.
 """
 
+from __future__ import annotations
+
 import subprocess
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from py2app.build_app import py2app
 from setuptools import setup
 
-APP = ["app.py"]
+try:
+    from py2app.build_app import py2app
+except ImportError:
+    py2app = None  # type: ignore[assignment]
+
+APP = ["src/hrm_live/__main__.py"]
 APP_NAME = "HRM Live"
 ENTITLEMENTS = Path("hrm-live.entitlements")
+PACKAGE_NAME = "hrm-bar"
 
 DATA_FILES = []
 
@@ -32,8 +39,7 @@ OPTIONS = {
             "monitor strap and display live BPM data."
         ),
         "NSBluetoothPeripheralUsageDescription": (
-            "HRM Live uses Bluetooth to connect to your heart rate "
-            "monitor strap."
+            "HRM Live uses Bluetooth to connect to your heart rate monitor strap."
         ),
         "NSHumanReadableCopyright": "MIT License",
         "LSUIElement": True,  # No dock icon (menu bar only)
@@ -42,7 +48,8 @@ OPTIONS = {
         "rumps",
         "bleak",
         "matplotlib",
-        "ui",
+        "hrm_live",
+        "hrm_live.ui",
     ],
     "includes": [
         "AppKit",
@@ -65,14 +72,18 @@ OPTIONS = {
 }
 
 
-class Py2AppWithEntitlements(py2app):
+class Py2AppWithEntitlements(py2app if py2app is not None else object):
     """Build the app and ad-hoc sign it with Bluetooth entitlements."""
 
     def finalize_options(self):
+        if py2app is None:
+            raise RuntimeError("Install the build extra before running py2app.")
         self.distribution.install_requires = None
         super().finalize_options()
 
     def run(self):
+        if py2app is None:
+            raise RuntimeError("Install the build extra before running py2app.")
         super().run()
         app_path = Path(self.dist_dir) / f"{APP_NAME}.app"
         if not app_path.exists():
@@ -93,10 +104,24 @@ class Py2AppWithEntitlements(py2app):
             check=True,
         )
 
+
+def _version_plist() -> dict[str, str]:
+    """Derive bundle version values from installed project metadata."""
+
+    try:
+        app_version = version(PACKAGE_NAME)
+    except PackageNotFoundError:
+        app_version = "0.1.0"
+    return {
+        "CFBundleVersion": app_version,
+        "CFBundleShortVersionString": app_version,
+    }
+
+
 setup(
     name=APP_NAME,
     app=APP,
     data_files=DATA_FILES,
-    options={"py2app": OPTIONS},
+    options={"py2app": {**OPTIONS, "plist": {**OPTIONS["plist"], **_version_plist()}}},
     cmdclass={"py2app": Py2AppWithEntitlements},
 )

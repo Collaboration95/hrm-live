@@ -8,35 +8,37 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import objc
 from AppKit import (
-    NSImage,
-    NSImageView,
-    NSView,
-    NSTextField,
-    NSFont,
-    NSColor,
     NSApp,
-    NSPopover,
-    NSPopoverBehaviorTransient,
-    NSViewController,
-    NSButton,
+    NSAttributedString,
     NSBezelStyleRounded,
     NSBezierPath,
-    NSGraphicsContext,
-    NSAttributedString,
+    NSButton,
+    NSColor,
+    NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSGraphicsContext,
+    NSImage,
+    NSImageView,
+    NSModalResponseOK,
+    NSPopover,
+    NSPopoverBehaviorTransient,
+    NSSavePanel,
+    NSTextField,
+    NSView,
+    NSViewController,
 )
 from Foundation import NSString
 
-from state import AppState
-from zones import get_zone, zone_color, zone_label, ZONE_ORDER
-from ui.graph import render_graph
-import session as sess_mod
+import hrm_live.session as sess_mod
+from hrm_live.state import AppState, ExportSnapshot, UISnapshot
+from hrm_live.ui.graph import render_graph
+from hrm_live.zones import ZONE_ORDER, get_zone, zone_color, zone_label
 
 log = logging.getLogger(__name__)
 
@@ -49,10 +51,19 @@ GAUGE_LINE_WIDTH = 14
 class HRMPopover:
     """Popover controller — manages the NSPopover lifecycle."""
 
-    def __init__(self, state: AppState) -> None:
+    def __init__(
+        self,
+        state: AppState,
+        *,
+        save_panel_factory: Any | None = None,
+        on_quit: Any | None = None,
+    ) -> None:
         self.state = state
         self._popover: NSPopover | None = None
         self._latest_graph_bytes: bytes | None = None
+        self._latest_graph_key: tuple[Any, ...] | None = None
+        self._save_panel_factory = save_panel_factory or macos_save_panel
+        self._on_quit = on_quit
         self.on_settings: Any = None  # callback for settings button
 
     @property
@@ -93,12 +104,10 @@ class HRMPopover:
 
     def _build_view(self) -> NSView:
         """Build the full popover content as an NSView."""
-        s = self.state
+        s = self.state.snapshot_for_ui()
 
         # Root view with dark background
-        root = ColoredRectView.alloc().initWithFrame_(
-            ((0, 0), (POPOVER_WIDTH, POPOVER_HEIGHT))
-        )
+        root = ColoredRectView.alloc().initWithFrame_(((0, 0), (POPOVER_WIDTH, POPOVER_HEIGHT)))
         root.setColor_(_ns_color("#1F1F1F"))
 
         y_offset = POPOVER_HEIGHT - 30
@@ -116,29 +125,30 @@ class HRMPopover:
         }
 
         bpm = s.latest_bpm if s.connected and s.latest_bpm is not None else None
-        if bpm is not None:
-            current_zone = get_zone(bpm, max_hr, zone_bounds)
-        else:
-            current_zone = "Z1"
+        current_zone = get_zone(bpm, max_hr, zone_bounds) if bpm is not None else "Z1"
 
         z_col = _ns_color(zone_color(current_zone, colors_cfg))
 
         # ── Hero BPM ──────────────────────────────────────────────
         bpm_str = f"{bpm}" if bpm is not None else "---"
-        lbl = _make_label(bpm_str, NSFont.boldSystemFontOfSize_(36),
-                          z_col, (20, y_offset - 10, 180, 44))
+        lbl = _make_label(
+            bpm_str, NSFont.boldSystemFontOfSize_(36), z_col, (20, y_offset - 10, 180, 44)
+        )
         root.addSubview_(lbl)
 
         # Zone label
         label = zone_label(current_zone)
         zone_str = f"{current_zone} — {label}"
-        lbl2 = _make_label(zone_str, NSFont.systemFontOfSize_(14),
-                           z_col, (20, y_offset - 48, 200, 24))
+        lbl2 = _make_label(
+            zone_str, NSFont.systemFontOfSize_(14), z_col, (20, y_offset - 48, 200, 24)
+        )
         root.addSubview_(lbl2)
 
         # ── Donut gauge ───────────────────────────────────────────
-        gauge_frame = ((POPOVER_WIDTH - GAUGE_SIZE - 10, y_offset - GAUGE_SIZE - 10),
-                       (GAUGE_SIZE, GAUGE_SIZE))
+        gauge_frame = (
+            (POPOVER_WIDTH - GAUGE_SIZE - 10, y_offset - GAUGE_SIZE - 10),
+            (GAUGE_SIZE, GAUGE_SIZE),
+        )
         gauge_view = DonutGaugeView.alloc().initWithFrame_(gauge_frame)
         gauge_view.setBpm_zone_zoneBounds_maxHr_colorsCfg_(
             bpm, current_zone, zone_bounds, max_hr, colors_cfg
@@ -149,13 +159,7 @@ class HRMPopover:
 
         # ── Graph ──────────────────────────────────────────────────
         if s.ring_buffer:
-            png_bytes = render_graph(
-                s.ring_buffer,
-                max_hr=max_hr,
-                window_minutes=cfg.get("graph_window_minutes", 10),
-                zones=zones_cfg,
-                zone_colors=colors_cfg,
-            )
+            png_bytes = self._graph_bytes(s, max_hr, zones_cfg, colors_cfg)
             if png_bytes:
                 image = NSImage.alloc().initWithData_(png_bytes)
                 if image:
@@ -184,10 +188,10 @@ class HRMPopover:
         if s.session_active or s.session_count > 0:
             # Elapsed time
             if s.session_active and s.session_start:
-                elapsed = datetime.now(timezone.utc) - s.session_start
+                elapsed = datetime.now(UTC) - s.session_start
                 elapsed_str = _format_td(elapsed)
             elif s.session_start and s.session_data:
-                elapsed = s.session_data[-1][0] - s.session_data[0][0]
+                elapsed = s.session_data[-1].timestamp - s.session_data[0].timestamp
                 elapsed_str = _format_td(elapsed)
             else:
                 elapsed_str = "00:00:00"
@@ -197,8 +201,12 @@ class HRMPopover:
             mn = s.session_min if s.session_count > 0 else 0
             stats_str = f"Session: {elapsed_str}   Avg: {avg:.0f}   Max: {mx}   Min: {mn}"
 
-            lbl3 = _make_label(stats_str, NSFont.systemFontOfSize_(11),
-                               NSColor.whiteColor(), (10, y_offset - 20, POPOVER_WIDTH - 20, 20))
+            lbl3 = _make_label(
+                stats_str,
+                NSFont.systemFontOfSize_(11),
+                NSColor.whiteColor(),
+                (10, y_offset - 20, POPOVER_WIDTH - 20, 20),
+            )
             root.addSubview_(lbl3)
             y_offset -= 30
 
@@ -206,8 +214,12 @@ class HRMPopover:
             for zone in ZONE_ORDER:
                 seconds = s.zone_times.get(zone, 0)
                 bar_str = f"{zone}  {_format_td_short(seconds)}"
-                lbl4 = _make_label(bar_str, NSFont.systemFontOfSize_(10),
-                                   NSColor.lightGrayColor(), (15, y_offset - 18, 100, 18))
+                lbl4 = _make_label(
+                    bar_str,
+                    NSFont.systemFontOfSize_(10),
+                    NSColor.lightGrayColor(),
+                    (15, y_offset - 18, 100, 18),
+                )
                 root.addSubview_(lbl4)
 
                 # Simple bar
@@ -228,19 +240,38 @@ class HRMPopover:
             return root
 
         # Session toggle
-        if s.session_active:
-            btn_title = "■ Stop Session"
-        else:
-            btn_title = "▶ Start Session"
+        btn_title = "■ Stop Session" if s.session_active else "▶ Start Session"
 
         btn = NSButton.alloc().initWithFrame_(((10, y_offset - 36), (130, 32)))
         btn.setBezelStyle_(NSBezelStyleRounded)
         btn.setTarget_(self)
-        btn.setAction_(
-            "start_session:" if not s.session_active else "stop_session:"
-        )
+        btn.setAction_("start_session:" if not s.session_active else "stop_session:")
         _set_dark_button_title(btn, btn_title)
         root.addSubview_(btn)
+
+        if (not s.session_active) and s.pending_export and s.last_csv_path is None:
+            retry_btn = NSButton.alloc().initWithFrame_(((10, y_offset - 74), (160, 30)))
+            retry_btn.setBezelStyle_(NSBezelStyleRounded)
+            retry_btn.setTarget_(self)
+            retry_btn.setAction_("save_last_session:")
+            _set_dark_button_title(retry_btn, "Save Last Session...")
+            root.addSubview_(retry_btn)
+        elif s.last_csv_path:
+            saved = _make_label(
+                f"Saved: {s.last_csv_path}",
+                NSFont.systemFontOfSize_(10),
+                NSColor.lightGrayColor(),
+                (10, y_offset - 64, POPOVER_WIDTH - 20, 36),
+            )
+            root.addSubview_(saved)
+        elif s.last_csv_error:
+            err = _make_label(
+                s.last_csv_error,
+                NSFont.systemFontOfSize_(10),
+                NSColor.systemRedColor(),
+                (10, y_offset - 64, POPOVER_WIDTH - 20, 36),
+            )
+            root.addSubview_(err)
 
         # Settings button
         settings_btn = NSButton.alloc().initWithFrame_(((150, y_offset - 36), (100, 32)))
@@ -249,6 +280,13 @@ class HRMPopover:
         settings_btn.setAction_("open_settings:")
         _set_dark_button_title(settings_btn, "⚙ Settings")
         root.addSubview_(settings_btn)
+
+        quit_btn = NSButton.alloc().initWithFrame_(((150, y_offset - 74), (100, 30)))
+        quit_btn.setBezelStyle_(NSBezelStyleRounded)
+        quit_btn.setTarget_(self)
+        quit_btn.setAction_("quit:")
+        _set_dark_button_title(quit_btn, "Quit")
+        root.addSubview_(quit_btn)
 
         return root
 
@@ -265,10 +303,9 @@ class HRMPopover:
     def stop_session_(self, sender: Any) -> None:
         """Stop the active session and export CSV."""
         try:
-            cfg = self.state.config or {}
-            max_hr = cfg.get("max_hr", 190)
-            zones_cfg = cfg.get("zones", {})
-            sess_mod.stop_session(self.state, max_hr=max_hr, zones=zones_cfg)
+            snapshot = sess_mod.finalize_session(self.state)
+            if snapshot is not None and not snapshot.is_empty:
+                self._save_snapshot(snapshot)
             self.refresh()
         except Exception:
             log.exception("Failed to stop session")
@@ -280,6 +317,56 @@ class HRMPopover:
                 self.on_settings()
         except Exception:
             log.exception("Failed to open settings")
+
+    def save_last_session_(self, sender: Any) -> None:
+        """Retry saving a finalized session after cancel or write failure."""
+
+        snapshot = sess_mod.retryable_export(self.state)
+        if snapshot is not None:
+            self._save_snapshot(snapshot)
+        self.refresh()
+
+    def quit_(self, sender: Any) -> None:
+        """Footer Quit button callback."""
+
+        if self._on_quit is not None:
+            self._on_quit()
+
+    def _save_snapshot(self, snapshot: ExportSnapshot) -> None:
+        destination = self._save_panel_factory(sess_mod.suggested_csv_filename())
+        if destination is None:
+            return
+        try:
+            path = sess_mod.export_session_csv(snapshot, destination)
+        except Exception as exc:
+            self.state.mark_export_failure(str(exc))
+        else:
+            self.state.mark_export_success(str(path))
+
+    def _graph_bytes(
+        self,
+        snapshot: UISnapshot,
+        max_hr: int,
+        zones_cfg: dict,
+        colors_cfg: dict,
+    ) -> bytes | None:
+        key = (
+            snapshot.ring_revision,
+            max_hr,
+            snapshot.config.get("graph_window_minutes", 10) if snapshot.config else 10,
+            tuple(sorted(zones_cfg.items())),
+            tuple(sorted(colors_cfg.items())),
+        )
+        if key != self._latest_graph_key:
+            self._latest_graph_bytes = render_graph(
+                snapshot.ring_buffer,
+                max_hr=max_hr,
+                window_minutes=key[2],
+                zones=zones_cfg,
+                zone_colors=colors_cfg,
+            )
+            self._latest_graph_key = key
+        return self._latest_graph_bytes
 
 
 # ── Donut Gauge View ────────────────────────────────────────────────────
@@ -295,14 +382,14 @@ class DonutGaugeView(NSView):
     Uses NSBezierPath for reliable arc drawing in PyObjC.
     """
 
-    def initWithFrame_(self, frame: tuple) -> "DonutGaugeView":
+    def initWithFrame_(self, frame: tuple) -> DonutGaugeView:
         self = objc.super(DonutGaugeView, self).initWithFrame_(frame)
         if self:
-            self._bpm = None
-            self._zone = "Z1"
-            self._zone_bounds = {}
-            self._max_hr = 190
-            self._colors_cfg = {}
+            self._bpm: int | None = None
+            self._zone: str = "Z1"
+            self._zone_bounds: dict[str, float] = {}
+            self._max_hr: int = 190
+            self._colors_cfg: dict[str, str] = {}
         return self
 
     def setBpm_zone_zoneBounds_maxHr_colorsCfg_(
@@ -382,12 +469,10 @@ class DonutGaugeView(NSView):
                     rad = math.radians(angle_deg)
                     tick_path = NSBezierPath.bezierPath()
                     tick_path.moveToPoint_(
-                        (cx + tick_inner_r * math.cos(rad),
-                         cy + tick_inner_r * math.sin(rad))
+                        (cx + tick_inner_r * math.cos(rad), cy + tick_inner_r * math.sin(rad))
                     )
                     tick_path.lineToPoint_(
-                        (cx + tick_outer_r * math.cos(rad),
-                         cy + tick_outer_r * math.sin(rad))
+                        (cx + tick_outer_r * math.cos(rad), cy + tick_outer_r * math.sin(rad))
                     )
                     tick_path.setLineWidth_(1.5)
                     NSColor.grayColor().setStroke()
@@ -411,7 +496,7 @@ class DonutGaugeView(NSView):
 class ColoredRectView(NSView):
     """Simple colored view that avoids layer-backed AppKit initialization."""
 
-    def initWithFrame_(self, frame: tuple) -> "ColoredRectView":
+    def initWithFrame_(self, frame: tuple) -> ColoredRectView:
         self = objc.super(ColoredRectView, self).initWithFrame_(frame)
         if self:
             self._color = NSColor.clearColor()
@@ -432,8 +517,23 @@ class ColoredRectView(NSView):
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-def _make_label(text: str, font: NSFont, color: NSColor,
-                frame: tuple[float, float, float, float]) -> NSTextField:
+def macos_save_panel(default_name: str) -> str | None:
+    """Return a user-selected CSV path, or ``None`` when the panel is cancelled."""
+
+    panel = NSSavePanel.savePanel()
+    panel.setNameFieldStringValue_(default_name)
+    panel.setCanCreateDirectories_(True)
+    panel.setAllowedFileTypes_(["csv"])
+    panel.setExtensionHidden_(False)
+    if panel.runModal() != NSModalResponseOK:
+        return None
+    url = panel.URL()
+    return None if url is None else str(url.path())
+
+
+def _make_label(
+    text: str, font: NSFont, color: NSColor, frame: tuple[float, float, float, float]
+) -> NSTextField:
     """Convenience: create a non-editable, non-bezelled text field."""
     f = NSTextField.alloc().initWithFrame_(_rect(frame))
     f.setStringValue_(text)
@@ -478,7 +578,7 @@ def _set_dark_button_title(button: NSButton, title: str) -> None:
     button.setAccessibilityLabel_(title)
 
 
-def _empty_graph_placeholder(state: AppState) -> str:
+def _empty_graph_placeholder(state: UISnapshot) -> str:
     if state.scan_status == "scanning":
         return "Scanning for heart-rate monitors..."
     if state.connection_status in {"connecting", "reconnecting"}:
@@ -488,7 +588,7 @@ def _empty_graph_placeholder(state: AppState) -> str:
     return "No HR data yet — waiting for connection..."
 
 
-def _connection_target_name(state: AppState) -> str:
+def _connection_target_name(state: UISnapshot) -> str:
     config = state.config or {}
     device_name = config.get("device_name", "")
     if device_name:
@@ -505,9 +605,9 @@ def _format_td(td: Any) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def _format_td_short(seconds: int) -> str:
+def _format_td_short(seconds: float) -> str:
     """Format seconds to MM:SS or HH:MM:SS if long."""
-    h, remainder = divmod(seconds, 3600)
+    h, remainder = divmod(int(seconds), 3600)
     m, s = divmod(remainder, 60)
     if h:
         return f"{h:02d}:{m:02d}:{s:02d}"

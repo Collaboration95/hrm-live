@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=68.0", "setuptools-scm>=8"]
 build_backend = "setuptools.build_meta"
 
 [project]
@@ -19,16 +19,63 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
+    "mypy>=1.10",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
     "pytest-mock",
     "pytest-asyncio",
+    "ruff>=0.6.0",
 ]
+build = [
+    "py2app>=0.28.8",
+]
+
+[project.scripts]
+hrm-live = "hrm_live.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hrm_live = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::ImportWarning",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["hrm_live"]
+
+[tool.coverage.report]
+fail_under = 54
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"src/hrm_live/ui/graph.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["hrm_live"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+no_implicit_optional = true
+follow_imports = "skip"

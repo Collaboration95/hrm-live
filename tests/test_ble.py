@@ -6,33 +6,32 @@ via mock/monkeypatch.  No real BleakClient is ever instantiated.
 
 import asyncio
 import threading
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Callable
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
+from bleak.exc import BleakBluetoothNotAvailableReason
 
-from ble import (
-    BLEManager,
+from hrm_live.ble import (
     HEART_RATE_SERVICE_UUID,
-    parse_heart_rate,
-    _make_callback,
     HEART_RATE_UUID,
+    BLEManager,
+    _make_callback,
     bluetooth_unavailable_message,
     connection_failure_message,
     format_discovered_device_label,
     normalize_discovered_device,
-    start_ble_background,
-    stop_ble_background,
+    parse_heart_rate,
     scan_failure_message,
     sort_discovered_devices,
+    start_ble_background,
+    stop_ble_background,
 )
-from bleak.backends.device import BLEDevice
-from bleak.backends.scanner import AdvertisementData
-from bleak.exc import BleakBluetoothNotAvailableReason
-from state import AppState
-from state import DiscoveredDevice
-
+from hrm_live.state import AppState, DiscoveredDevice
 
 # ── Parsing ─────────────────────────────────────────────────────────────
 
@@ -142,7 +141,9 @@ def test_bluetooth_unavailable_messages_are_concise() -> None:
         action="scan again",
     )
     assert scan_failure_message(RuntimeError("boom")) == "Bluetooth scan failed. Try again."
-    assert connection_failure_message(RuntimeError("boom")) == "Bluetooth connection failed. Retrying."
+    assert (
+        connection_failure_message(RuntimeError("boom")) == "Bluetooth connection failed. Retrying."
+    )
 
 
 # ── Callback integration ────────────────────────────────────────────────
@@ -192,7 +193,7 @@ async def test_scan_worker_publishes_incremental_results() -> None:
     state = AppState()
     manager = BLEManager(state)
 
-    with patch("ble.BleakScanner", FakeScanner):
+    with patch("hrm_live.ble.BleakScanner", FakeScanner):
         await manager._scan_worker(0.0)
 
     assert state.scan_status == "complete"
@@ -210,7 +211,7 @@ async def test_scan_cancel_sets_cancelled_without_touching_connection() -> None:
     state.connection_status = "connected"
     manager = BLEManager(state)
 
-    with patch("ble.BleakScanner", FakeScanner):
+    with patch("hrm_live.ble.BleakScanner", FakeScanner):
         task = asyncio.create_task(manager._scan_worker(1.0))
         await asyncio.sleep(0)
         task.cancel()
@@ -227,17 +228,17 @@ async def test_scan_cancel_sets_cancelled_without_touching_connection() -> None:
 @pytest.mark.asyncio
 async def test_ble_loop_no_address() -> None:
     """BLE loop returns immediately when address is empty."""
-    from ble import ble_loop
+    import hrm_live.ble as ble_mod
 
     state = AppState()
-    await ble_loop(state, "")
+    await ble_mod.ble_loop(state, "")
     # Should not crash, should not connect
 
 
 @pytest.mark.asyncio
 async def test_ble_loop_connect_and_notify() -> None:
     """Test BLE loop with a mocked BleakClient and stop via cancellation."""
-    from ble import ble_loop
+    import hrm_live.ble as ble_mod
 
     state = AppState()
     state.config = {
@@ -252,18 +253,14 @@ async def test_ble_loop_connect_and_notify() -> None:
 
     stop_event = threading.Event()
 
-    with patch("ble.BleakClient", return_value=mock_client):
-        task = asyncio.create_task(
-            ble_loop(state, "AA:BB:CC:DD:EE:FF", stop_event)
-        )
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
+        task = asyncio.create_task(ble_mod.ble_loop(state, "AA:BB:CC:DD:EE:FF", stop_event))
         await asyncio.sleep(0.1)
         stop_event.set()
         await asyncio.sleep(0.05)
         task.cancel()
-        try:
+        with suppress(asyncio.CancelledError, StopIteration):
             await task
-        except (asyncio.CancelledError, StopIteration):
-            pass
 
     # Should have connected and set up notification
     assert mock_client.start_notify.called
@@ -296,7 +293,7 @@ def test_start_ble_background_creates_daemon() -> None:
     mock_client.__aenter__.return_value = mock_client
     mock_client.is_connected = False  # Don't enter notify loop
 
-    with patch("ble.BleakClient", return_value=mock_client):
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
         mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
         assert mgr is not None
         assert mgr.thread.daemon is True
@@ -305,6 +302,7 @@ def test_start_ble_background_creates_daemon() -> None:
 
         # Wait a tiny bit for the async loop to start
         import time
+
         time.sleep(0.2)
 
         # Stop cleanly
@@ -322,7 +320,7 @@ def test_connect_uses_cached_ble_device_when_available() -> None:
     mock_client.is_connected = False
     cached_device = _device("AA:BB:CC:DD:EE:FF", "Polar H10")
 
-    with patch("ble.BleakClient", return_value=mock_client) as client_ctor:
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client) as client_ctor:
         assert mgr.ready_event.wait(timeout=2)
         mgr.connect("AA:BB:CC:DD:EE:FF", cached_device=cached_device)
         import time
@@ -342,16 +340,15 @@ def test_stop_ble_background_none() -> None:
 def test_ble_loop_stops_on_stop_event() -> None:
     """The BLE loop returns when stop_event is set (not via cancellation)."""
     state = AppState()
-    stop_event = threading.Event()
-
     # Create an async mock client that keeps is_connected=True
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.is_connected = True
 
-    with patch("ble.BleakClient", return_value=mock_client):
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
         mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
         import time
+
         time.sleep(0.3)
 
         # Stop should cause ble_loop to exit on its own
@@ -368,7 +365,7 @@ def test_stop_ble_background_cancels_loop_task() -> None:
     mock_client.__aenter__.return_value = mock_client
     mock_client.is_connected = True
 
-    with patch("ble.BleakClient", return_value=mock_client):
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
         mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
         assert mgr.ready_event.wait(timeout=2)
         stop_ble_background(mgr, join_timeout=3)
@@ -376,6 +373,8 @@ def test_stop_ble_background_cancels_loop_task() -> None:
     assert mgr.stop_event.is_set()
     assert not mgr.thread.is_alive()
     assert mgr.task is None or mgr.task.done()
+
+
 # ── Test helpers ────────────────────────────────────────────────────────
 
 

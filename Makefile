@@ -2,16 +2,20 @@ PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
 MPLCONFIGDIR ?= /tmp/hrm-live-matplotlib
 APP_BUNDLE := dist/HRM Live.app
-COMPILE_PATHS := app.py state.py ble.py config.py zones.py session.py ui tests setup.py
+COMPILE_PATHS := src tests setup.py
 
-.PHONY: help venv install run test test-verbose compile check build verify-bundle package clean
+.PHONY: help venv install run format format-check lint typecheck test test-verbose coverage compile check build verify-bundle package clean
 
 help:
 	@printf "HRM Live development targets:\n"
 	@printf "  make venv           Create .venv with python3\n"
 	@printf "  make install        Install app and dev dependencies into .venv\n"
 	@printf "  make run            Run the menu bar app in dev mode\n"
+	@printf "  make format-check   Check formatting with Ruff\n"
+	@printf "  make lint           Run Ruff lint\n"
+	@printf "  make typecheck      Run mypy\n"
 	@printf "  make test           Run the pytest suite\n"
+	@printf "  make coverage       Run tests with coverage threshold\n"
 	@printf "  make test-verbose   Run the pytest suite with verbose output\n"
 	@printf "  make compile        Compile-check Python modules\n"
 	@printf "  make check          Run tests and compile-checks\n"
@@ -24,10 +28,22 @@ venv:
 	python3 -m venv .venv
 
 install:
-	$(PIP) install -e ".[dev]"
+	$(PIP) install -e ".[dev,build]"
 
 run:
-	$(PYTHON) app.py
+	$(PYTHON) -m hrm_live
+
+format:
+	$(PYTHON) -m ruff format src tests setup.py
+
+format-check:
+	$(PYTHON) -m ruff format --check src tests setup.py
+
+lint:
+	$(PYTHON) -m ruff check src tests setup.py
+
+typecheck:
+	$(PYTHON) -m mypy
 
 test:
 	$(PYTHON) -m pytest
@@ -35,10 +51,13 @@ test:
 test-verbose:
 	$(PYTHON) -m pytest -v
 
+coverage:
+	$(PYTHON) -m pytest --cov --cov-report=term-missing
+
 compile:
 	$(PYTHON) -m compileall $(COMPILE_PATHS)
 
-check: test compile
+check: format-check lint typecheck test coverage compile
 
 build:
 	@mkdir -p "$(MPLCONFIGDIR)"

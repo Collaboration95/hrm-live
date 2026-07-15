@@ -9,7 +9,6 @@ is renamed with a .corrupt suffix.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -39,6 +38,7 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 
 
 # ── Public API ───────────────────────────────────────────────────────────
+
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config from *path* (default ~/.config/hrm/config.json).
@@ -83,15 +83,14 @@ def save_config(config: dict[str, Any], path: Path | None = None) -> None:
 
 # ── Validation ───────────────────────────────────────────────────────────
 
+
 def _validate_config(config: dict[str, Any]) -> None:
     """Raise ``ValueError`` if *config* contains invalid values."""
     errors: list[str] = []
 
     device_address = config.get("device_address", "")
     if not isinstance(device_address, str):
-        errors.append(
-            f"device_address must be a string, got {device_address!r}"
-        )
+        errors.append(f"device_address must be a string, got {device_address!r}")
 
     device_name = config.get("device_name", "")
     if not isinstance(device_name, str):
@@ -141,9 +140,10 @@ def _is_valid_hex_color(s: str) -> bool:
 
 # ── Internal helpers ─────────────────────────────────────────────────────
 
-def _deep_copy(d: dict) -> dict:
+
+def _deep_copy(d: dict[str, Any]) -> dict[str, Any]:
     """Return a deep-enough copy for our simple nested dicts."""
-    out = {}
+    out: dict[str, Any] = {}
     for k, v in d.items():
         if isinstance(v, dict):
             out[k] = _deep_copy(v)
@@ -169,7 +169,7 @@ def _safely_rename_corrupt(path: Path) -> None:
         return
     counter = 0
     while True:
-        suffix = f".corrupt" if counter == 0 else f".corrupt.{counter}"
+        suffix = ".corrupt" if counter == 0 else f".corrupt.{counter}"
         dst = path.with_name(path.name + suffix)
         if not dst.exists():
             shutil.move(str(path), str(dst))
