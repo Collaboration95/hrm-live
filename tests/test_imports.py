@@ -125,6 +125,79 @@ def test_popover_duration_formats_clamped_zone_seconds() -> None:
     assert _format_td_seconds(3661) == "01:01:01"
 
 
+def test_popover_export_feedback_shows_error_with_retry() -> None:
+    """A failed export keeps retry available and surfaces a readable error."""
+    from datetime import UTC, datetime
+
+    from hrm_live.state import AppState
+    from hrm_live.ui.popover import _export_feedback
+
+    state = AppState()
+    state.start_session(datetime(2026, 7, 15, tzinfo=UTC))
+    state.record_bpm(datetime(2026, 7, 15, 0, 0, 1, tzinfo=UTC), 120)
+    assert state.finalize_session() is not None
+    state.mark_export_failure("disk full")
+
+    assert _export_feedback(state.snapshot_for_ui()) == (
+        True,
+        "Save failed: disk full",
+        True,
+    )
+
+
+def test_status_item_is_configured_only_after_rumps_creates_it() -> None:
+    """Dashboard-first wiring clears rumps' menu after status-bar setup."""
+    from hrm_live.ui.menubar import HRMBarApp, _StatusButtonTarget
+
+    class FakeButton:
+        def __init__(self) -> None:
+            self.target = None
+            self.action = None
+
+        def setTarget_(self, target) -> None:
+            self.target = target
+
+        def setAction_(self, action: str) -> None:
+            self.action = action
+
+    class FakeStatusItem:
+        def __init__(self) -> None:
+            self.button_value = FakeButton()
+            self.menu = object()
+
+        def button(self) -> FakeButton:
+            return self.button_value
+
+        def setMenu_(self, menu) -> None:
+            self.menu = menu
+
+    app = object.__new__(HRMBarApp)
+    app._status_item_configured = False
+    app._status_button_target = None
+    status_item = FakeStatusItem()
+    app._nsapp = type("FakeNSApp", (), {"nsstatusitem": status_item})()
+
+    assert app._configure_status_item() is True
+    assert status_item.menu is None
+    assert isinstance(status_item.button_value.target, _StatusButtonTarget)
+    assert status_item.button_value.action == "statusButtonClicked:"
+    assert app._configure_status_item() is True
+
+
+def test_status_button_target_forwards_to_dashboard() -> None:
+    """The retained NSObject bridge forwards AppKit's click selector."""
+    from hrm_live.ui.menubar import _StatusButtonTarget
+
+    calls: list[object] = []
+    app = type("FakeApp", (), {"_open_popover": lambda _self, sender: calls.append(sender)})()
+    target = _StatusButtonTarget.alloc().initWithApp_(app)
+    sender = object()
+
+    target.statusButtonClicked_(sender)
+
+    assert calls == [sender]
+
+
 def test_settings_panel_headless_guard() -> None:
     """Settings panel fails safely instead of aborting without NSApplication."""
     from hrm_live.state import AppState

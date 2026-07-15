@@ -194,11 +194,12 @@ class AppState:
             return self._pending_export
 
     def mark_export_success(self, path: str) -> None:
-        """Record a successful user-selected CSV destination."""
+        """Record a successful destination and clear retryable export data."""
 
         with self._lock:
             self.last_csv_path = path
             self.last_csv_error = None
+            self._pending_export = None
 
     def mark_export_failure(self, message: str) -> None:
         """Record a retryable CSV export error."""

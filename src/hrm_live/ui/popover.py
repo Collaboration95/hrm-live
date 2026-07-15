@@ -240,29 +240,26 @@ class HRMPopover:
         _set_dark_button_title(btn, btn_title)
         root.addSubview_(btn)
 
-        if (not s.session_active) and s.pending_export and s.last_csv_path is None:
+        show_retry, export_message, export_is_error = _export_feedback(s)
+        if show_retry:
             retry_btn = NSButton.alloc().initWithFrame_(((10, y_offset - 74), (160, 30)))
             retry_btn.setBezelStyle_(NSBezelStyleRounded)
             retry_btn.setTarget_(self)
             retry_btn.setAction_("save_last_session:")
             _set_dark_button_title(retry_btn, "Save Last Session...")
             root.addSubview_(retry_btn)
-        elif s.last_csv_path:
-            saved = _make_label(
-                f"Saved: {s.last_csv_path}",
-                NSFont.systemFontOfSize_(10),
-                NSColor.lightGrayColor(),
-                (10, y_offset - 64, POPOVER_WIDTH - 20, 36),
+        if export_message:
+            message_y = y_offset - (104 if show_retry else 64)
+            message_color = (
+                NSColor.systemRedColor() if export_is_error else NSColor.lightGrayColor()
             )
-            root.addSubview_(saved)
-        elif s.last_csv_error:
-            err = _make_label(
-                s.last_csv_error,
+            message = _make_label(
+                export_message,
                 NSFont.systemFontOfSize_(10),
-                NSColor.systemRedColor(),
-                (10, y_offset - 64, POPOVER_WIDTH - 20, 36),
+                message_color,
+                (10, message_y, POPOVER_WIDTH - 20, 22),
             )
-            root.addSubview_(err)
+            root.addSubview_(message)
 
         # Settings button
         settings_btn = NSButton.alloc().initWithFrame_(((150, y_offset - 36), (100, 32)))
@@ -520,6 +517,17 @@ def macos_save_panel(default_name: str) -> str | None:
         return None
     url = panel.URL()
     return None if url is None else str(url.path())
+
+
+def _export_feedback(snapshot: UISnapshot) -> tuple[bool, str | None, bool]:
+    """Return retry visibility, message, and error styling for export state."""
+
+    has_pending_export = bool(snapshot.pending_export)
+    if snapshot.last_csv_error:
+        return has_pending_export, f"Save failed: {snapshot.last_csv_error}", True
+    if snapshot.last_csv_path:
+        return False, f"Saved: {snapshot.last_csv_path}", False
+    return has_pending_export, None, False
 
 
 def _make_label(

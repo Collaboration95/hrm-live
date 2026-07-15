@@ -148,6 +148,21 @@ def test_cancel_semantics_are_retryable_without_error(state: AppState) -> None:
     assert session.retryable_export(state) is snapshot
 
 
+def test_successful_export_state_is_not_retryable(state: AppState) -> None:
+    """A completed save clears in-memory retry data but retains its path."""
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    assert session.finalize_session(state) is not None
+
+    state.mark_export_success("/tmp/workout.csv")
+
+    snapshot = state.snapshot_for_ui()
+    assert session.retryable_export(state) is None
+    assert snapshot.pending_export == ()
+    assert snapshot.last_csv_path == "/tmp/workout.csv"
+    assert snapshot.last_csv_error is None
+
+
 def test_export_replace_overwrite_is_complete(state: AppState, tmp_path: Path) -> None:
     destination = tmp_path / "existing.csv"
     destination.write_text("old partial data", encoding="utf-8")

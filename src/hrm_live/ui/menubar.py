@@ -13,6 +13,7 @@ import threading
 import objc
 import rumps
 from AppKit import NSAttributedString, NSColor, NSForegroundColorAttributeName
+from Foundation import NSObject
 
 from hrm_live.ble import BLEManager, stop_ble_background
 from hrm_live.state import AppState
@@ -26,16 +27,37 @@ DISCONNECTED_TITLE = "⚪ ---"
 UI_REFRESH_SECONDS = 1.0
 
 
+class _StatusButtonTarget(NSObject):
+    """Objective-C bridge that forwards an NSStatusBar button action to Python."""
+
+    def initWithApp_(self, app: HRMBarApp) -> _StatusButtonTarget:
+        self = objc.super(_StatusButtonTarget, self).init()
+        if self is not None:
+            self._app = app
+        return self
+
+    @objc.IBAction
+    def statusButtonClicked_(self, sender) -> None:
+        """Forward the Objective-C ``statusButtonClicked:`` selector."""
+
+        self._app._open_popover(sender)
+
+
 class HRMBarApp(rumps.App):
     """Main menu bar application."""
 
     def __init__(self, state: AppState, ble_manager: BLEManager | None = None) -> None:
-        super().__init__("HRM", title=DISCONNECTED_TITLE)
+        # rumps otherwise appends its own Quit item during ``run()``. The
+        # dashboard footer owns the sole visible quit route so BLE shutdown is
+        # always coordinated by this class.
+        super().__init__("HRM", title=DISCONNECTED_TITLE, quit_button=None)
         self.state = state
         self.ble_manager = ble_manager
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self._quit_requested = False
+        self._status_item_configured = False
+        self._status_button_target: _StatusButtonTarget | None = None
         self.popover = HRMPopover(state, on_quit=self.shutdown)
         self.settings = SettingsWindow(
             state,
@@ -45,18 +67,15 @@ class HRMBarApp(rumps.App):
         )
         self.popover.on_settings = self.settings.show
 
-        # Secondary menu fallback. Normal left-click is installed directly on
-        # the NSStatusItem button and toggles the dashboard first.
-        self.menu = [
-            rumps.MenuItem("Settings", callback=self._open_settings),
-            None,
-            rumps.MenuItem("Quit", callback=self._quit),
-        ]
-
         # 1-second UI refresh timer
         self.timer = rumps.Timer(self._tick, UI_REFRESH_SECONDS)
         self.timer.start()
-        self._install_status_button_action()
+
+        # rumps creates the native status item inside ``App.run()``, after this
+        # constructor returns. Registering at ``before_start`` makes the
+        # dashboard-first action run after that creation step rather than
+        # silently doing nothing during construction.
+        rumps.events.before_start.register(self._configure_status_item)
 
     # ── Timer tick ────────────────────────────────────────────────────
 
@@ -138,26 +157,40 @@ class HRMBarApp(rumps.App):
         status_item = getattr(nsapp, "nsstatusitem", None)
         return status_item.button() if status_item is not None else None
 
-    def _install_status_button_action(self) -> None:
-        """Attach left-click to the dashboard toggle.
+    def _configure_status_item(self) -> bool:
+        """Install dashboard-first status-item behavior after rumps setup.
 
-        PyObjC maps the Objective-C selector ``status_button_clicked:`` to the
-        Python method ``status_button_clicked_``.  The method must remain on
-        this long-lived app object so AppKit does not call a freed callback.
+        AppKit targets must be Objective-C objects. ``_StatusButtonTarget`` is
+        retained on this long-lived app object and maps the
+        ``statusButtonClicked:`` selector back to ``_open_popover()``.
+
+        rumps assigns a menu while initializing its status item. Clearing that
+        menu is required: otherwise macOS consumes a normal click to open the
+        menu instead of sending the button action below. Settings and Quit are
+        available from the dashboard footer.
         """
 
-        button = self._status_item_button()
-        if button is not None:
-            button.setTarget_(self)
-            button.setAction_("status_button_clicked:")
+        if self._status_item_configured:
+            return True
 
-    @objc.IBAction
-    def status_button_clicked_(self, sender) -> None:
-        self._open_popover(sender)
+        nsapp = getattr(self, "_nsapp", None)
+        status_item = getattr(nsapp, "nsstatusitem", None)
+        if status_item is None:
+            log.error("Cannot configure dashboard click: status item is unavailable")
+            return False
 
-    def _open_settings(self, _sender: rumps.MenuItem | None = None) -> None:
-        """Open the settings window."""
-        self.settings.show()
+        button = status_item.button()
+        if button is None:
+            log.error("Cannot configure dashboard click: status button is unavailable")
+            return False
+
+        status_item.setMenu_(None)
+        if self._status_button_target is None:
+            self._status_button_target = _StatusButtonTarget.alloc().initWithApp_(self)
+        button.setTarget_(self._status_button_target)
+        button.setAction_("statusButtonClicked:")
+        self._status_item_configured = True
+        return True
 
     def _start_scan(self) -> None:
         if self.ble_manager is not None:
@@ -189,11 +222,6 @@ class HRMBarApp(rumps.App):
 
         self.settings.refresh_from_state(force=True)
 
-    def _quit(self, _sender: rumps.MenuItem | None = None) -> None:
-        """Route menu Quit through the guarded shutdown coordinator."""
-
-        self.shutdown()
-
     def shutdown(self, request_quit: bool = True) -> None:
         """Stop BLE once and then request application termination."""
 
@@ -212,6 +240,7 @@ class HRMBarApp(rumps.App):
 
         if self.timer is not None:
             self.timer.stop()
+        rumps.events.before_start.unregister(self._configure_status_item)
         if manager is not None:
             stop_ble_background(manager)
         if should_quit:
