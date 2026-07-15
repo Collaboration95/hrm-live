@@ -153,6 +153,7 @@ tests/
   ...
 docs/
   RELEASE_IMPLEMENTATION_HANDOFF.md
+  RELEASE_READINESS_AUDIT_2026-07-15.md  # Current independent release status
 ```
 
 ## Privacy And Limitations
@@ -161,6 +162,13 @@ HRM Live keeps Bluetooth readings, settings, and session data local to your
 Mac unless you explicitly export a CSV. The app is for fitness display and
 record keeping only; it is not a medical device and does not promise medical
 accuracy.
+
+## Open-source project
+
+Please read [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), the
+[Code of Conduct](CODE_OF_CONDUCT.md), and [Support](SUPPORT.md) before opening
+an issue or pull request. Do not publish BLE identifiers, session data,
+certificates, tokens, or other secrets in public issues.
 
 ## Release Status
 

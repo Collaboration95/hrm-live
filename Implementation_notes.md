@@ -1,5 +1,10 @@
 # Implementation Notes
 
+> Historical implementation record. The current independent release decision,
+> P0 defects, and ordered remediation plan are in
+> [`docs/RELEASE_READINESS_AUDIT_2026-07-15.md`](docs/RELEASE_READINESS_AUDIT_2026-07-15.md).
+> This file must not be used as evidence that the app is release-ready.
+
 ## Summary
 
 Implemented the HRM Live release handoff as a local, tested implementation.
