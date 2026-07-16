@@ -8,8 +8,8 @@ after the lock is released.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -70,7 +70,7 @@ class UISnapshot:
     last_csv_path: str | None
     last_csv_error: str | None
     pending_export: tuple[SessionSample, ...]
-    recent_sessions: tuple["RecentSessionRecord", ...]
+    recent_sessions: tuple[RecentSessionRecord, ...]
     config: dict[str, Any] | None
 
 
@@ -133,7 +133,7 @@ class RecentSessionRecord:
         *,
         session_id: str,
         archived_at: datetime,
-    ) -> "RecentSessionRecord":
+    ) -> RecentSessionRecord:
         return cls(
             session_id=session_id,
             session_start=snapshot.session_start,
@@ -147,7 +147,7 @@ class RecentSessionRecord:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RecentSessionRecord":
+    def from_dict(cls, data: dict[str, Any]) -> RecentSessionRecord:
         def _parse_dt(value: Any) -> datetime | None:
             if value in {None, ""}:
                 return None
@@ -190,7 +190,7 @@ class RecentSessionRecord:
             "exported_at": self.exported_at.isoformat() if self.exported_at else None,
         }
 
-    def with_export(self, path: str, fmt: str | None = None) -> "RecentSessionRecord":
+    def with_export(self, path: str, fmt: str | None = None) -> RecentSessionRecord:
         return replace(
             self,
             export_path=path,
@@ -443,9 +443,7 @@ class AppState:
             if not isinstance(payload, list):
                 raise ValueError("recent sessions file must contain a list")
             sessions = [
-                RecentSessionRecord.from_dict(item)
-                for item in payload
-                if isinstance(item, dict)
+                RecentSessionRecord.from_dict(item) for item in payload if isinstance(item, dict)
             ]
         except Exception:
             log.exception("Failed to load recent sessions from %s", path)

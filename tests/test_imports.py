@@ -3,8 +3,9 @@
 No BLE, UI, config, or file I/O should happen at import time.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 def test_import_state() -> None:
@@ -195,7 +196,9 @@ def test_json_save_uses_json_panel_and_records_archive(tmp_path) -> None:
     popover = HRMPopover(state, save_panel_factory=panel_factory)
     popover._reveal_in_finder = lambda _path: None
 
-    with patch("hrm_live.ui.popover.sess_mod.export_session_json", return_value=tmp_path / "session.json"):
+    with patch(
+        "hrm_live.ui.popover.sess_mod.export_session_json", return_value=tmp_path / "session.json"
+    ):
         popover._save_snapshot(snapshot, fmt="json")
 
     assert calls and calls[0][1] == "json"

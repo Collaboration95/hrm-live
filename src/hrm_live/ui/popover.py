@@ -46,8 +46,8 @@ from AppKit import (
 )
 from Foundation import NSURL, NSString
 
-import hrm_live.session as sess_mod
 import hrm_live.config as cfg_mod
+import hrm_live.session as sess_mod
 from hrm_live.state import AppState, ExportSnapshot, UISnapshot
 from hrm_live.ui.graph import render_graph
 from hrm_live.ui.tokens import (
@@ -721,7 +721,9 @@ class HRMPopover:
         y -= 42
 
         export_container_h = 56
-        export_container = NSView.alloc().initWithFrame_(((x, y - export_container_h), (card_w, export_container_h)))
+        export_container = NSView.alloc().initWithFrame_(
+            ((x, y - export_container_h), (card_w, export_container_h))
+        )
         root.addSubview_(export_container)
         self._export_controls_container = export_container
         self._rebuild_export_controls(s)
@@ -813,7 +815,10 @@ class HRMPopover:
 
         recent = list(reversed(s.recent_sessions[-RECENT_SESSION_ROWS:]))
         container = NSView.alloc().initWithFrame_(
-            ((x + CARD_PADDING, cy - visible_rows * row_h), (card_w - 2 * CARD_PADDING, visible_rows * row_h))
+            (
+                (x + CARD_PADDING, cy - visible_rows * row_h),
+                (card_w - 2 * CARD_PADDING, visible_rows * row_h),
+            )
         )
         root.addSubview_(container)
         self._recent_sessions_container = container
@@ -859,7 +864,9 @@ class HRMPopover:
             )
             container.addSubview_(label)
 
-            reveal = NSButton.alloc().initWithFrame_(((container.frame().size.width - 112, row_y - 1), (52, 20)))
+            reveal = NSButton.alloc().initWithFrame_(
+                ((container.frame().size.width - 112, row_y - 1), (52, 20))
+            )
             reveal.setBezelStyle_(NSBezelStyleRounded)
             reveal.setTarget_(self)
             reveal.setAction_("reveal_recent_session:")
@@ -868,7 +875,9 @@ class HRMPopover:
             _set_dark_button_title(reveal, "Reveal")
             container.addSubview_(reveal)
 
-            delete_btn = NSButton.alloc().initWithFrame_(((container.frame().size.width - 56, row_y - 1), (52, 20)))
+            delete_btn = NSButton.alloc().initWithFrame_(
+                ((container.frame().size.width - 56, row_y - 1), (52, 20))
+            )
             delete_btn.setBezelStyle_(NSBezelStyleRounded)
             delete_btn.setTarget_(self)
             delete_btn.setAction_("delete_recent_session:")

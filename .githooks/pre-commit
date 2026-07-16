@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+
+set -eu
+
+if [ ! -x ".venv/bin/python" ]; then
+  printf '%s\n' "pre-commit: missing .venv/bin/python; run 'make install' first." >&2
+  exit 1
+fi
+
+printf '%s\n' "pre-commit: running format check, lint, and typecheck..."
+make format-check
+make lint
+make typecheck

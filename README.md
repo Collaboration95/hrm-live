@@ -60,6 +60,15 @@ make package
 The bundle is created at `dist/HRM Live.app`. `make package` also verifies
 the bundle signature, embedded entitlements, and Info.plist metadata.
 
+Install the repo-local git hooks once per clone:
+
+```bash
+make install-hooks
+```
+
+The pre-commit hook runs formatting, linting, and type checking before a
+commit is allowed through.
+
 Open the built app:
 
 ```bash
