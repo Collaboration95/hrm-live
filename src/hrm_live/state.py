@@ -8,6 +8,7 @@ after the lock is released.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,6 +16,8 @@ from threading import RLock
 from typing import Any
 
 from hrm_live.zones import get_zone
+
+log = logging.getLogger(__name__)
 
 ZONE_ZERO: dict[str, float] = {"Z1": 0.0, "Z2": 0.0, "Z3": 0.0, "Z4": 0.0}
 MAX_SESSION_GAP_SECONDS = 5.0
@@ -78,10 +81,16 @@ class ExportSnapshot:
     session_sum: int
     session_count: int
     zone_times: dict[str, float]
+    zone_transition_count: int = 0
 
     @property
     def is_empty(self) -> bool:
         return not self.rows
+
+    @property
+    def duration_seconds(self) -> float:
+        """Total session duration from zone time accumulation."""
+        return sum(self.zone_times.values())
 
 
 @dataclass
@@ -113,6 +122,9 @@ class AppState:
     _last_session_sample: SessionSample | None = field(default=None, init=False)
     _ring_revision: int = field(default=0, init=False)
     _pending_export: ExportSnapshot | None = field(default=None, init=False)
+    _last_zone: str | None = field(default=None, init=False)
+    _zone_transition_count: int = field(default=0, init=False)
+    _recent_sessions: list[ExportSnapshot] = field(default_factory=list, init=False)
 
     def record_bpm(self, timestamp: datetime, bpm: int) -> bool:
         """Record a BLE sample and update active session state.
@@ -120,6 +132,8 @@ class AppState:
         Returns ``True`` when the sample is valid and recorded.  Invalid BPMs
         and backward session timestamps are ignored while preserving existing
         state.
+
+        Tracks zone transitions during active sessions.
         """
 
         if bpm < 20 or bpm > 250:
@@ -137,6 +151,17 @@ class AppState:
 
             zone = self._zone_for_bpm(bpm)
             sample = SessionSample(timestamp=timestamp, bpm=bpm, zone=zone)
+
+            # Track zone transitions
+            if self._last_zone is not None and zone != self._last_zone:
+                self._zone_transition_count += 1
+                log.debug(
+                    "Zone transition: %s -> %s at %s",
+                    self._last_zone,
+                    zone,
+                    timestamp.isoformat(),
+                )
+            self._last_zone = zone
 
             if self._last_session_sample is not None:
                 delta = (timestamp - self._last_session_sample.timestamp).total_seconds()
@@ -173,6 +198,8 @@ class AppState:
             self.last_csv_error = None
             self._last_session_sample = None
             self._pending_export = None
+            self._last_zone = None
+            self._zone_transition_count = 0
 
     def finalize_session(self) -> ExportSnapshot | None:
         """Stop recording and retain an export snapshot without file I/O."""
@@ -185,6 +212,13 @@ class AppState:
             self._pending_export = None if snapshot.is_empty else snapshot
             self.last_csv_path = None
             self.last_csv_error = None
+
+            # Archive to recent sessions list (keep last 20)
+            if snapshot and not snapshot.is_empty:
+                self._recent_sessions.append(snapshot)
+                if len(self._recent_sessions) > 20:
+                    self._recent_sessions = self._recent_sessions[-20:]
+
             return self._pending_export
 
     def pending_export_snapshot(self) -> ExportSnapshot | None:
@@ -294,7 +328,13 @@ class AppState:
             session_sum=self.session_sum,
             session_count=self.session_count,
             zone_times=dict(self.zone_times),
+            zone_transition_count=self._zone_transition_count,
         )
+
+    def recent_sessions(self) -> tuple[ExportSnapshot, ...]:
+        """Return the list of recent completed sessions (oldest first)."""
+        with self._lock:
+            return tuple(self._recent_sessions)
 
     def _zone_for_bpm(self, bpm: int) -> str:
         cfg = self.config or {}

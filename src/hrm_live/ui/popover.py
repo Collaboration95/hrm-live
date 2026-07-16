@@ -101,6 +101,7 @@ class HRMPopover:
 
         # Persistent view references for value updates (no full rebuild)
         self._root_view: NSView | None = None
+        self._controls: dict[str, Any] = {}
         self._hero_label: NSTextField | None = None
         self._zone_label: NSTextField | None = None
         self._gauge_view: DonutGaugeView | None = None
@@ -670,7 +671,8 @@ class HRMPopover:
         elapsed = _format_td_short(sum(s.zone_times.values()))
         avg = s.session_sum / s.session_count if s.session_count > 0 else 0
         mx = s.session_max if s.session_count > 0 else 0
-        return f"{elapsed}  |  Avg {avg:.0f}  |  Max {mx}"
+        mn = s.session_min if s.session_count > 0 and s.session_min < 999 else 0
+        return f"{elapsed}  |  Avg {avg:.0f}  |  Max {mx}  |  Min {mn}"
 
     # ── Action Area ─────────────────────────────────────────────────────
 
@@ -705,13 +707,21 @@ class HRMPopover:
         show_retry, export_message, export_is_error = _export_feedback(s)
         if show_retry or export_message:
             if show_retry:
-                save_btn = NSButton.alloc().initWithFrame_(((x, y - 30), (160, 30)))
+                save_btn = NSButton.alloc().initWithFrame_(((x, y - 30), (140, 30)))
                 save_btn.setBezelStyle_(NSBezelStyleRounded)
                 save_btn.setTarget_(self)
                 save_btn.setAction_("save_last_session:")
-                _set_dark_button_title(save_btn, "💾 Save Last Session")
+                _set_dark_button_title(save_btn, "💾 Save CSV")
                 root.addSubview_(save_btn)
                 self._save_button = save_btn
+
+                json_btn = NSButton.alloc().initWithFrame_(((x + 148, y - 30), (140, 30)))
+                json_btn.setBezelStyle_(NSBezelStyleRounded)
+                json_btn.setTarget_(self)
+                json_btn.setAction_("save_last_session_json:")
+                _set_dark_button_title(json_btn, "📊 Save JSON")
+                root.addSubview_(json_btn)
+                self._controls["json_save_button"] = json_btn
 
             if export_message:
                 msg_col = NSColor.systemRedColor() if export_is_error else _ns_color(TEXT_SECONDARY)
@@ -731,6 +741,9 @@ class HRMPopover:
             if self._export_feedback:
                 self._export_feedback.removeFromSuperview()
                 self._export_feedback = None
+            json_btn = getattr(self, "_controls", {}).get("json_save_button")
+            if json_btn:
+                json_btn.removeFromSuperview()
 
         return y - 8
 
@@ -771,16 +784,33 @@ class HRMPopover:
             log.exception("Failed to open settings")
 
     def save_last_session_(self, sender: Any) -> None:
-        """Retry saving a finalized session after cancel or write failure."""
+        """Retry saving a finalized session as CSV."""
         snapshot = sess_mod.retryable_export(self.state)
         if snapshot is not None:
-            self._save_snapshot(snapshot)
+            self._save_snapshot(snapshot, fmt="csv")
         self.refresh()
 
-    def _save_snapshot(self, snapshot: ExportSnapshot) -> None:
-        """Open a destination picker and save without leaking callback errors."""
+    def save_last_session_json_(self, sender: Any) -> None:
+        """Retry saving a finalized session as JSON."""
+        snapshot = sess_mod.retryable_export(self.state)
+        if snapshot is not None:
+            self._save_snapshot(snapshot, fmt="json")
+        self.refresh()
+
+    def _save_snapshot(self, snapshot: ExportSnapshot, fmt: str = "csv") -> None:
+        """Open a destination picker and save without leaking callback errors.
+
+        Args:
+            snapshot: The completed session data to export.
+            fmt: ``"csv"`` for CSV export, ``"json"`` for JSON export.
+        """
+        suggested = (
+            sess_mod.suggested_json_filename()
+            if fmt == "json"
+            else sess_mod.suggested_csv_filename()
+        )
         try:
-            destination = self._save_panel_factory(sess_mod.suggested_csv_filename())
+            destination = self._save_panel_factory(suggested)
         except Exception:
             log.exception("Failed to open session save panel")
             self.state.mark_export_failure("Could not open the save dialog. Try again.")
@@ -788,18 +818,23 @@ class HRMPopover:
         if destination is None:
             return
         try:
-            path = sess_mod.export_session_csv(snapshot, destination)
+            if fmt == "json":
+                path = sess_mod.export_session_json(snapshot, destination)
+            else:
+                path = sess_mod.export_session_csv(snapshot, destination)
         except ValueError as exc:
             log.info("Session export destination was rejected: %s", exc)
             self.state.mark_export_failure(str(exc))
         except OSError:
-            log.exception("Failed to write session CSV")
+            log.exception("Failed to write session %s", fmt.upper())
             self.state.mark_export_failure(
-                "Could not write the CSV. Check the destination and try again."
+                f"Could not write the {fmt.upper()}. Check the destination and try again."
             )
         except Exception:
-            log.exception("Failed to export session CSV")
-            self.state.mark_export_failure("Could not save the session. Try again.")
+            log.exception("Failed to export session %s", fmt.upper())
+            self.state.mark_export_failure(
+                f"Could not save the session as {fmt.upper()}. Try again."
+            )
         else:
             self.state.mark_export_success(str(path))
             self._reveal_in_finder(str(path))
