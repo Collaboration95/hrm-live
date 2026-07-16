@@ -24,7 +24,7 @@ with a zone gauge, HR graph, and session recording.
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/Collaboration95/hrm-live.git
 cd hrm-live
 
 # Create a virtual environment and install dependencies
