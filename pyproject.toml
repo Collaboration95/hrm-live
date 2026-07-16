@@ -6,15 +6,15 @@ build_backend = "setuptools.build_meta"
 name = "hrm-bar"
 version = "0.1.0"
 description = "macOS menu bar app for BLE heart rate monitor straps"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = "MIT"
 
 dependencies = [
-    "rumps>=0.4.0",
+    "rumps>=0.4.0; platform_system == 'Darwin'",
     "bleak>=0.21.0",
     "matplotlib>=3.8.0",
-    "pyobjc-core",
-    "pyobjc-framework-Cocoa",
+    "pyobjc-core; platform_system == 'Darwin'",
+    "pyobjc-framework-Cocoa; platform_system == 'Darwin'",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +57,7 @@ skip_covered = true
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
@@ -69,7 +69,7 @@ ignore = ["E501"]
 "src/hrm_live/ui/graph.py" = ["E402"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 packages = ["hrm_live"]
 ignore_missing_imports = true
 warn_unused_ignores = true

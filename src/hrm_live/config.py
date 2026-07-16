@@ -56,7 +56,7 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     try:
         raw = cfg_path.read_text(encoding="utf-8")
         saved: Any = json.loads(raw)
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         # Rename broken file so the user can recover it
         _safely_rename_corrupt(cfg_path)
         return _deep_copy(DEFAULT_CONFIG)
@@ -119,7 +119,7 @@ def _validate_config(config: dict[str, Any]) -> None:
             z1 = float(zones.get("z1_max", 0.60))
             z2 = float(zones.get("z2_max", 0.75))
             z3 = float(zones.get("z3_max", 0.88))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             errors.append("zone boundaries must be numbers")
         else:
             if not (0 < z1 < z2 < z3 < 1):

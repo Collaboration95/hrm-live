@@ -32,3 +32,6 @@ sessions/
 
 # Config test data
 *.corrupt
+
+# Local documentation worktree
+docs/
