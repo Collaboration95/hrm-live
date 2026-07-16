@@ -8,6 +8,7 @@ The .app bundle will be created in dist/HRM Live.app.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -43,6 +44,10 @@ OPTIONS = {
         ),
         "NSHumanReadableCopyright": "MIT License",
         "LSUIElement": True,  # No dock icon (menu bar only)
+        # Python must not create __pycache__ directories inside a signed app
+        # bundle. Any bytecode written after signing invalidates the sealed
+        # resource manifest and causes Gatekeeper verification to fail.
+        "LSEnvironment": {"PYTHONDONTWRITEBYTECODE": "1"},
     },
     "packages": [
         "rumps",
@@ -90,6 +95,8 @@ class Py2AppWithEntitlements(py2app if py2app is not None else object):
             raise RuntimeError(f"Expected app bundle was not created: {app_path}")
         if not ENTITLEMENTS.exists():
             raise RuntimeError(f"Missing entitlements file: {ENTITLEMENTS}")
+        for cache_dir in app_path.rglob("__pycache__"):
+            shutil.rmtree(cache_dir)
         subprocess.run(
             [
                 "codesign",

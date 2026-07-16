@@ -3,6 +3,8 @@
 No BLE, UI, config, or file I/O should happen at import time.
 """
 
+from unittest.mock import patch
+
 import pytest
 
 
@@ -171,6 +173,41 @@ def test_save_panel_failure_keeps_export_retryable() -> None:
     )
 
 
+def test_json_save_uses_json_panel_and_records_archive(tmp_path) -> None:
+    """JSON export requests the JSON save panel and records the exported format."""
+    from datetime import UTC, datetime
+
+    from hrm_live.state import AppState
+    from hrm_live.ui.popover import HRMPopover
+
+    state = AppState()
+    state.set_recent_sessions_path(tmp_path / "recent_sessions.json")
+    state.start_session(datetime(2026, 7, 15, tzinfo=UTC))
+    state.record_bpm(datetime(2026, 7, 15, 0, 0, 1, tzinfo=UTC), 120)
+    snapshot = state.finalize_session()
+    assert snapshot is not None
+
+    calls: list[tuple[str, str]] = []
+
+    def panel_factory(default_name: str, fmt: str) -> str:
+        calls.append((default_name, fmt))
+        return str(tmp_path / "session.json")
+
+    popover = HRMPopover(state, save_panel_factory=panel_factory)
+    popover._reveal_in_finder = lambda _path: None
+
+    with patch(
+        "hrm_live.ui.popover.sess_mod.export_session_json", return_value=tmp_path / "session.json"
+    ):
+        popover._save_snapshot(snapshot, fmt="json")
+
+    assert calls and calls[0][1] == "json"
+    record = state.recent_sessions()[0]
+    assert record.export_path == str(tmp_path / "session.json")
+    assert record.export_format == "json"
+    assert state.snapshot_for_ui().last_csv_path == str(tmp_path / "session.json")
+
+
 def test_export_os_error_hides_selected_path_from_feedback(tmp_path) -> None:
     """Raw filesystem errors stay in logs rather than the user-visible dashboard."""
     from datetime import UTC, datetime
@@ -276,18 +313,26 @@ def test_settings_scan_callbacks_use_injected_functions() -> None:
             self._value = value
             self.title = value
             self.enabled = True
+            self._selected_segment = 1
 
         def setStringValue_(self, value: str) -> None:
             self._value = value
 
         def setTitle_(self, value: str) -> None:
             self.title = value
+            self._value = value
 
         def stringValue(self) -> str:
             return self._value
 
         def setEnabled_(self, value: bool) -> None:
             self.enabled = value
+
+        def setSelectedSegment_(self, index: int) -> None:
+            self._selected_segment = index
+
+        def selectedSegment(self) -> int:
+            return self._selected_segment
 
     class FakePopupItem:
         def __init__(self, title: str) -> None:

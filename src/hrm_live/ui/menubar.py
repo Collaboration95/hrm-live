@@ -12,19 +12,36 @@ import threading
 
 import objc
 import rumps
-from AppKit import NSAttributedString, NSColor, NSForegroundColorAttributeName
+from AppKit import (
+    NSAttributedString,
+    NSColor,
+    NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+)
 from Foundation import NSObject
 
 from hrm_live.ble import BLEManager, stop_ble_background
 from hrm_live.state import AppState
 from hrm_live.ui.popover import HRMPopover
 from hrm_live.ui.settings import SettingsWindow
-from hrm_live.zones import get_zone, zone_color
+from hrm_live.ui.tokens import menu_accessibility_label, status_dot_colour, zone_accent
+from hrm_live.zones import get_zone, zone_label
 
 log = logging.getLogger(__name__)
 
-DISCONNECTED_TITLE = "⚪ ---"
+DISCONNECTED_TITLE = "♡ ---"
 UI_REFRESH_SECONDS = 1.0
+
+# ── Status dot characters (visible without colour) ───────────────────────
+
+DOT_CHARS = {
+    "connected": "●",  # Filled circle
+    "connecting": "◌",  # Dotted circle (scanning/connecting)
+    "reconnecting": "◌",  # Dotted circle
+    "disconnected": "○",  # Open circle
+    "error": "○",  # Open circle (changes colour)
+}
 
 
 class _StatusButtonTarget(NSObject):
@@ -82,15 +99,35 @@ class HRMBarApp(rumps.App):
     def _tick(self, _sender: rumps.Timer) -> None:
         """Read shared state and update the menu bar title."""
         s = self.state.snapshot_for_ui()
+
+        zone = self._current_zone(s.latest_bpm, s.config) if s.latest_bpm is not None else "Z1"
+        colors_cfg = (s.config or {}).get("zone_colors", {})
+        dot_color = status_dot_colour(s.connection_status)
+        dot_char = DOT_CHARS.get(s.connection_status, "○")
+
+        # Build title: BPM text in system primary colour, zone dot in zone/status colour
         if s.connected and s.latest_bpm is not None:
-            title = f"❤️ {s.latest_bpm} bpm"
-            color_hex = zone_color(
-                self._current_zone(s.latest_bpm, s.config),
-                (s.config or {}).get("zone_colors"),
-            )
-            self._set_colored_title(title, color_hex)
+            zone_col = zone_accent(zone, colors_cfg)
+            z_label = zone_label(zone)
+            text_part = f"♥ {s.latest_bpm} bpm {z_label}"
         else:
-            self._set_colored_title(DISCONNECTED_TITLE, "#888888")
+            zone_col = dot_color
+            text_part = DISCONNECTED_TITLE
+
+        self._set_dual_colour_title(text_part, dot_char, zone_col if s.connected else dot_color)
+
+        log.debug("Menu tick: status=%s", s.connection_status)
+
+        # Accessibility
+        a11y_label = menu_accessibility_label(
+            s.latest_bpm if s.connected else None,
+            zone,
+            zone_label(zone),
+            s.connection_status,
+        )
+        button = self._status_item_button()
+        if button:
+            button.setAccessibilityLabel_(a11y_label)
 
         # Refresh popover content if it's open
         if self.popover.is_shown:
@@ -112,30 +149,49 @@ class HRMBarApp(rumps.App):
         }
         return get_zone(bpm, max_hr, zone_bounds)
 
-    # ── Colored title shim (PyObjC) ──────────────────────────────────
+    # ── Dual-colour attributed title ─────────────────────────────────
 
-    def _set_colored_title(self, title: str, hex_color: str) -> None:
-        """Set the menu bar title with *hex_color* via NSAttributedString.
+    def _set_dual_colour_title(self, text: str, dot: str, dot_hex: str) -> None:
+        """Set the menu bar title with white text + a coloured status/zone dot.
 
-        If PyObjC is unavailable or fails, falls back to plain ``.title``.
+        The BPM text and heart are drawn in system label colour (white in
+        dark mode, black in light).  The trailing dot character uses the
+        zone or status colour as a supplementary cue.
         """
         try:
-            r = int(hex_color[1:3], 16) / 255.0
-            g = int(hex_color[3:5], 16) / 255.0
-            b = int(hex_color[5:7], 16) / 255.0
-            color = NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0)
-            attrs = {NSForegroundColorAttributeName: color}
-
             button = self._status_item_button()
-            if button:
-                attributed = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
-                button.setAttributedTitle_(attributed)
+            if button is None:
+                self.title = f"{text} {dot}"
                 return
-        except Exception:
-            log.debug("Failed to set colored title, using plain text", exc_info=True)
 
-        # Fallback
-        self.title = title
+            full = f"{text} {dot}"
+
+            # White/system text colour for the main portion
+            primary = NSColor.labelColor()
+            text_attrs = {
+                NSForegroundColorAttributeName: primary,
+                NSFontAttributeName: NSFont.menuBarFontOfSize_(0),
+            }
+
+            # Zone/status colour for the dot
+            dr = int(dot_hex[1:3], 16) / 255.0
+            dg = int(dot_hex[3:5], 16) / 255.0
+            db = int(dot_hex[5:7], 16) / 255.0
+            dot_col = NSColor.colorWithRed_green_blue_alpha_(dr, dg, db, 1.0)
+            dot_attrs = {
+                NSForegroundColorAttributeName: dot_col,
+                NSFontAttributeName: NSFont.menuBarFontOfSize_(0),
+            }
+
+            attributed = NSAttributedString.alloc().initWithString_attributes_(full, text_attrs)
+            # Apply dot colour to the last character (the dot)
+            dot_range = (len(full) - 1, 1)
+            attributed.addAttributes_range_(dot_attrs, dot_range)
+
+            button.setAttributedTitle_(attributed)
+        except Exception:
+            log.debug("Failed to set dual-colour title, using plain text", exc_info=True)
+            self.title = f"{text} {dot}"
 
     # ── Actions ──────────────────────────────────────────────────────
 

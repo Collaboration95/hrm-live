@@ -4,12 +4,13 @@ MPLCONFIGDIR ?= /tmp/hrm-live-matplotlib
 APP_BUNDLE := dist/HRM Live.app
 COMPILE_PATHS := src tests scripts setup.py
 
-.PHONY: help venv install run format format-check lint typecheck test test-verbose coverage compile check icon build verify-bundle package clean
+.PHONY: help venv install install-hooks run format format-check lint typecheck test test-verbose coverage compile check icon build verify-bundle package clean
 
 help:
 	@printf "HRM Live development targets:\n"
 	@printf "  make venv           Create .venv with python3\n"
 	@printf "  make install        Install app and dev dependencies into .venv\n"
+	@printf "  make install-hooks  Install repo-local git hooks\n"
 	@printf "  make run            Run the menu bar app in dev mode\n"
 	@printf "  make format-check   Check formatting with Ruff\n"
 	@printf "  make lint           Run Ruff lint\n"
@@ -30,6 +31,9 @@ venv:
 
 install:
 	$(PIP) install -e ".[dev,build]"
+
+install-hooks:
+	./scripts/install-git-hooks.sh
 
 run:
 	$(PYTHON) -m hrm_live

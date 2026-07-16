@@ -181,3 +181,43 @@ def test_suggested_filename_is_readable() -> None:
         return datetime(2026, 7, 15, 18, 30, tzinfo=UTC)
 
     assert session.suggested_csv_filename(clock=clock) == "HRM Live 2026-07-15 18-30.csv"
+
+
+def test_recent_sessions_persist_and_reload(state: AppState, tmp_path: Path) -> None:
+    archive_path = tmp_path / "recent_sessions.json"
+    state.set_recent_sessions_path(archive_path)
+
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    snapshot = session.finalize_session(state)
+
+    assert snapshot is not None
+    assert state.recent_sessions()[0].session_count == 1
+    assert archive_path.exists()
+
+    reloaded = AppState()
+    reloaded.set_recent_sessions_path(archive_path)
+    reloaded.load_recent_sessions()
+
+    sessions = reloaded.recent_sessions()
+    assert len(sessions) == 1
+    assert sessions[0].session_count == 1
+    assert sessions[0].duration_seconds == 0.0
+
+
+def test_recent_session_export_metadata_is_recorded(state: AppState, tmp_path: Path) -> None:
+    archive_path = tmp_path / "recent_sessions.json"
+    state.set_recent_sessions_path(archive_path)
+
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    snapshot = session.finalize_session(state)
+
+    assert snapshot is not None
+    state.mark_export_success("/tmp/workout.json", "json")
+
+    record = state.recent_sessions()[0]
+    assert record.export_path == "/tmp/workout.json"
+    assert record.export_format == "json"
+    assert record.has_export is True
+    assert state.snapshot_for_ui().recent_sessions[0].export_path == "/tmp/workout.json"

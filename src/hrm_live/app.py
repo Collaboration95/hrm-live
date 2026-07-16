@@ -42,6 +42,8 @@ def main() -> None:
     # Initialize shared state
     state = AppState()
     state.set_config(config)
+    state.set_recent_sessions_path(cfg_mod.CONFIG_DIR / "recent_sessions.json")
+    state.load_recent_sessions()
 
     # Start the persistent BLE background thread even when no device is saved.
     device_addr = config.get("device_address", "")
