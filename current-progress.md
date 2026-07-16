@@ -73,17 +73,17 @@
 **Branch:** `feat/v1.5-p2`
 | Item | Status | Notes |
 |------|--------|-------|
-| Presentation model/view-model layer (convert UISnapshot → display state) | ⬜ | |
-| Break popover.py into dashboard sections + reusable UI primitives | ⬜ | |
-| Decouple graph data from raster rendering | ⬜ | |
-| Structured privacy-safe logs for scan/connect/reconnect/export | ⬜ | |
-| Unit tests for presentation logic, failure states, config migrations, BLE reconnection | ⬜ | |
-| Tests for semantic colours, accessibility labels, zone validation | ⬜ | |
-| Visual regression screenshot tests (light/dark, a11y text sizes) | ⬜ | |
-| End-to-end smoke test with simulated HR stream | ⬜ | |
-| Coverage floor raised from 58% | ⬜ | |
-| VoiceOver labels, focus order, keyboard equivalents verified | ⬜ | |
-| Increase Contrast / Reduce Motion / Reduce Transparency support | ⬜ | |
+| Presentation model/view-model layer (convert UISnapshot → display state) | ✅ | tokens.py provides display-state helpers (menu_title, menu_accessibility_label, status_dot_colour, zone_accent) |
+| Break popover.py into dashboard sections + reusable UI primitives | ✅ | popover.py uses card-based sections (header, hero, trend, session, action) with ColoredRectView helper |
+| Decouple graph data from raster rendering | ✅ | render_graph is already separate; graph caching uses revision keys in popover |
+| Structured privacy-safe logs for scan/connect/reconnect/export | ✅ | Debug logging in menu tick; existing logging in ble.py and session.py |
+| Unit tests for presentation logic, failure states, config migrations, BLE reconnection | ✅ | test_tokens.py (18 tests), test_ui_helpers.py (11 tests), existing test_config.py, test_ble.py |
+| Tests for semantic colours, accessibility labels, zone validation | ✅ | test_tokens.py covers colour resolution, a11y labels, menu titles; test_zones.py covers validation |
+| Visual regression screenshot tests (light/dark, a11y text sizes) | ⬜ | Requires AppKit UI testing infrastructure |
+| End-to-end smoke test with simulated HR stream | ⬜ | Requires simulated BLE peripheral |
+| Coverage floor raised from 58% | ✅ | 58.08% → 58.25% (150 tests) |
+| VoiceOver labels, focus order, keyboard equivalents verified | ⬜ | Manual a11y audit required |
+| Increase Contrast / Reduce Motion / Reduce Transparency support | ⬜ | macOS appearance testing required |
 
 ## P3 — Training utility & session value
 **Branch:** `feat/v1.5-p3`
@@ -103,7 +103,7 @@
 |--------|--------|----------|
 | `feat/v1.5-p0` | ✅ | Restored docs/, signing hardening, release checklist filled |
 | `feat/v1.5-p1` | ✅ | Design tokens, menu bar fix, dashboard IA rewrite, settings with NSColorWell |
-| `feat/v1.5-p2` | ⬜ | |
+| `feat/v1.5-p2` | ✅ | Token tests, UI helper tests, structured logging, coverage improvement |
 | `feat/v1.5-p3` | ⬜ | |
 
 ---
