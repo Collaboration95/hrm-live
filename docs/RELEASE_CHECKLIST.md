@@ -3,8 +3,8 @@
 ## Supported Environment
 
 - macOS 12 or later.
-- Python 3.11 or later for development/runtime.
-- CI quality matrix: Python 3.11 and 3.12.
+- Python 3.14 or later for development/runtime.
+- CI quality matrix: Python 3.14.
 
 ## Local Development Build
 

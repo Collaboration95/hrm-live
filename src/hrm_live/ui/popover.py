@@ -17,6 +17,7 @@ the entire view hierarchy every timer tick.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import Any
 
 import objc
@@ -46,6 +47,7 @@ from AppKit import (
 from Foundation import NSURL, NSString
 
 import hrm_live.session as sess_mod
+import hrm_live.config as cfg_mod
 from hrm_live.state import AppState, ExportSnapshot, UISnapshot
 from hrm_live.ui.graph import render_graph
 from hrm_live.ui.tokens import (
@@ -79,6 +81,7 @@ log = logging.getLogger(__name__)
 POPOVER_WIDTH = 344
 GAUGE_LABEL_FONT_SIZE = 12
 HERO_FONT_SIZE = 48
+RECENT_SESSION_ROWS = 4
 
 
 class HRMPopover:
@@ -109,10 +112,13 @@ class HRMPopover:
         self._graph_placeholder: NSTextField | None = None
         self._trend_selector: NSSegmentedControl | None = None
         self._session_stats_label: NSTextField | None = None
-        self._zone_bar_views: list[NSView] = []
+        self._zone_bar_container: NSView | None = None
         self._session_button: NSButton | None = None
         self._save_button: NSButton | None = None
+        self._json_save_button: NSButton | None = None
         self._export_feedback: NSTextField | None = None
+        self._export_controls_container: NSView | None = None
+        self._recent_sessions_container: NSView | None = None
         self._header_device_label: NSTextField | None = None
         self._header_dot_view: NSView | None = None
         self._action_area_y: float = 0
@@ -199,12 +205,17 @@ class HRMPopover:
 
         # ── Trend card: graph ───────────────────────────────────────
         self._update_graph(s, max_hr, zones_cfg, colors_cfg)
+        if self._trend_selector:
+            self._trend_selector.setSelectedSegment_(self._trend_segment_for_minutes(s.config))
 
         # ── Session card ────────────────────────────────────────────
         self._update_session(s, colors_cfg)
 
         # ── Action area ─────────────────────────────────────────────
         self._update_actions(s)
+
+        # ── Recent sessions ────────────────────────────────────────
+        self._update_recent_sessions(s)
 
     def _calculate_height(self) -> float:
         """Estimate the total popover height based on content sections."""
@@ -216,8 +227,8 @@ class HRMPopover:
         h += GRAPH_HEIGHT + 30 + SECTION_GAP
         # Session card: stats + zone bars
         h += 60 + 100 + SECTION_GAP
-        # Action area: buttons
-        h += 80 + OUTER_PADDING
+        # Action area + recent sessions archive
+        h += 80 + 128 + SECTION_GAP
         return max(h, 520)
 
     def _build_view(self) -> NSView:
@@ -270,6 +281,12 @@ class HRMPopover:
         # ACTION AREA
         # ═══════════════════════════════════════════════════════════════
         y = self._build_action_area(root, y, s)
+        y -= SECTION_GAP
+
+        # ═══════════════════════════════════════════════════════════════
+        # RECENT SESSIONS
+        # ═══════════════════════════════════════════════════════════════
+        y = self._build_recent_sessions_card(root, y, s)
         _ = y  # bottom padding handled by height
 
         return root
@@ -513,9 +530,14 @@ class HRMPopover:
         """Handle graph time range selection."""
         segments = {0: 5, 1: 10, 2: 30}
         minutes = segments.get(sender.selectedSegment(), 10)
-        cfg = self.state.snapshot_for_ui().config or {}
+        cfg = deepcopy(self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG)
         if cfg.get("graph_window_minutes") != minutes:
             cfg["graph_window_minutes"] = minutes
+            self.state.set_config(cfg)
+            try:
+                cfg_mod.save_config(cfg)
+            except Exception:
+                log.exception("Failed to persist graph window change")
             self._latest_graph_key = None  # Force graph redraw
             self.refresh()
 
@@ -615,28 +637,12 @@ class HRMPopover:
 
         # Zone time bars
         zone_bar_y = cy - bar_area_h
-        for zone in ZONE_ORDER:
-            seconds = s.zone_times.get(zone, 0)
-            bar_str = f"{zone}  {_format_td_short(seconds)}"
-            lbl = _make_label(
-                bar_str,
-                NSFont.systemFontOfSize_(10),
-                _ns_color(TEXT_SECONDARY),
-                (x + CARD_PADDING, zone_bar_y, 80, 16),
-            )
-            root.addSubview_(lbl)
-
-            total = sum(s.zone_times.values()) or 1
-            frac = seconds / total
-            bar_w = max(int(frac * (card_w - 2 * CARD_PADDING - 90)), 4)
-            bar = ColoredRectView.alloc().initWithFrame_(
-                ((x + CARD_PADDING + 85, zone_bar_y + 2), (bar_w, 12))
-            )
-            bar.setColor_(_ns_color(zone_accent(zone, colors_cfg)))
-            bar.setCornerRadius_(2)
-            root.addSubview_(bar)
-            self._zone_bar_views.extend([lbl, bar])
-            zone_bar_y += 18
+        zone_container = NSView.alloc().initWithFrame_(
+            ((x + CARD_PADDING, zone_bar_y), (card_w - 2 * CARD_PADDING, bar_area_h))
+        )
+        root.addSubview_(zone_container)
+        self._zone_bar_container = zone_container
+        self._rebuild_zone_bars(s, colors_cfg)
 
         return y - card_h - INLINE_GAP
 
@@ -644,26 +650,7 @@ class HRMPopover:
         """Update session stats and zone bars without rebuilding."""
         if self._session_stats_label:
             self._session_stats_label.setStringValue_(self._session_stats_string(s))
-
-        # Update zone bars (recreate since number can vary)
-        # For simplicity, we rebuild the zone bar sub-views each time
-        # since the count is fixed (4 zones) and this avoids complexity.
-        # In a more advanced implementation, we'd update in place.
-        parent = self._root_view
-        if not parent:
-            return
-
-        # Remove old bar views
-        for v in self._zone_bar_views:
-            v.removeFromSuperview()
-        self._zone_bar_views = []
-
-        # Find the session card to locate zone bar position
-        # Simplified: we rebuild them (they're lightweight)
-        # In practice with persistent views, we'd find and update them.
-        # Since this is called from refresh(), we scan subviews for the
-        # session card container and update known labels.
-        # For now, we skip zone-bar animation and just update via rebuild.
+        self._rebuild_zone_bars(s, colors_cfg)
 
     def _session_stats_string(self, s: UISnapshot) -> str:
         if not s.session_active and s.session_count == 0:
@@ -673,6 +660,36 @@ class HRMPopover:
         mx = s.session_max if s.session_count > 0 else 0
         mn = s.session_min if s.session_count > 0 and s.session_min < 999 else 0
         return f"{elapsed}  |  Avg {avg:.0f}  |  Max {mx}  |  Min {mn}"
+
+    def _rebuild_zone_bars(self, s: UISnapshot, colors_cfg: dict) -> None:
+        container = self._zone_bar_container
+        if container is None:
+            return
+
+        for child in list(container.subviews()):
+            child.removeFromSuperview()
+
+        bar_area_w = container.frame().size.width
+        total = sum(s.zone_times.values()) or 1
+        row_height = 18
+        for idx, zone in enumerate(ZONE_ORDER):
+            row_y = idx * row_height
+            seconds = s.zone_times.get(zone, 0)
+            bar_str = f"{zone}  {_format_td_short(seconds)}"
+            lbl = _make_label(
+                bar_str,
+                NSFont.systemFontOfSize_(10),
+                _ns_color(TEXT_SECONDARY),
+                (0, row_y, 80, 16),
+            )
+            container.addSubview_(lbl)
+
+            frac = seconds / total
+            bar_w = max(int(frac * (bar_area_w - 90)), 4)
+            bar = ColoredRectView.alloc().initWithFrame_(((85, row_y + 2), (bar_w, 12)))
+            bar.setColor_(_ns_color(zone_accent(zone, colors_cfg)))
+            bar.setCornerRadius_(2)
+            container.addSubview_(bar)
 
     # ── Action Area ─────────────────────────────────────────────────────
 
@@ -703,49 +720,13 @@ class HRMPopover:
         self._session_button = primary_btn
         y -= 42
 
-        # Secondary row: Save + Export feedback
-        show_retry, export_message, export_is_error = _export_feedback(s)
-        if show_retry or export_message:
-            if show_retry:
-                save_btn = NSButton.alloc().initWithFrame_(((x, y - 30), (140, 30)))
-                save_btn.setBezelStyle_(NSBezelStyleRounded)
-                save_btn.setTarget_(self)
-                save_btn.setAction_("save_last_session:")
-                _set_dark_button_title(save_btn, "💾 Save CSV")
-                root.addSubview_(save_btn)
-                self._save_button = save_btn
+        export_container_h = 56
+        export_container = NSView.alloc().initWithFrame_(((x, y - export_container_h), (card_w, export_container_h)))
+        root.addSubview_(export_container)
+        self._export_controls_container = export_container
+        self._rebuild_export_controls(s)
 
-                json_btn = NSButton.alloc().initWithFrame_(((x + 148, y - 30), (140, 30)))
-                json_btn.setBezelStyle_(NSBezelStyleRounded)
-                json_btn.setTarget_(self)
-                json_btn.setAction_("save_last_session_json:")
-                _set_dark_button_title(json_btn, "📊 Save JSON")
-                root.addSubview_(json_btn)
-                self._controls["json_save_button"] = json_btn
-
-            if export_message:
-                msg_col = NSColor.systemRedColor() if export_is_error else _ns_color(TEXT_SECONDARY)
-                fb = _make_label(
-                    export_message,
-                    NSFont.systemFontOfSize_(10),
-                    msg_col,
-                    (x, y - 50, card_w, 20),
-                )
-                root.addSubview_(fb)
-                self._export_feedback = fb
-                y -= 24 if not show_retry else 50
-        else:
-            if self._save_button:
-                self._save_button.removeFromSuperview()
-                self._save_button = None
-            if self._export_feedback:
-                self._export_feedback.removeFromSuperview()
-                self._export_feedback = None
-            json_btn = getattr(self, "_controls", {}).get("json_save_button")
-            if json_btn:
-                json_btn.removeFromSuperview()
-
-        return y - 8
+        return y - export_container_h - 8
 
     def _update_actions(self, s: UISnapshot) -> None:
         """Update action button titles and visibility."""
@@ -754,6 +735,182 @@ class HRMPopover:
             self._session_button.setTitle_(title)
             action = "stop_session:" if s.session_active else "start_session:"
             self._session_button.setAction_(action)
+        self._rebuild_export_controls(s)
+
+    def _rebuild_export_controls(self, s: UISnapshot) -> None:
+        container = self._export_controls_container
+        if container is None:
+            return
+
+        for child in list(container.subviews()):
+            child.removeFromSuperview()
+
+        show_retry, export_message, export_is_error = _export_feedback(s)
+        if show_retry:
+            save_btn = NSButton.alloc().initWithFrame_(((0, 24), (140, 30)))
+            save_btn.setBezelStyle_(NSBezelStyleRounded)
+            save_btn.setTarget_(self)
+            save_btn.setAction_("save_last_session:")
+            _set_dark_button_title(save_btn, "💾 Save CSV")
+            container.addSubview_(save_btn)
+            self._save_button = save_btn
+
+            json_btn = NSButton.alloc().initWithFrame_(((148, 24), (140, 30)))
+            json_btn.setBezelStyle_(NSBezelStyleRounded)
+            json_btn.setTarget_(self)
+            json_btn.setAction_("save_last_session_json:")
+            _set_dark_button_title(json_btn, "📊 Save JSON")
+            container.addSubview_(json_btn)
+            self._json_save_button = json_btn
+            self._controls["json_save_button"] = json_btn
+        else:
+            self._save_button = None
+            self._json_save_button = None
+            self._controls.pop("json_save_button", None)
+
+        if export_message:
+            msg_col = NSColor.systemRedColor() if export_is_error else _ns_color(TEXT_SECONDARY)
+            fb = _make_label(
+                export_message,
+                NSFont.systemFontOfSize_(10),
+                msg_col,
+                (0, 0, container.frame().size.width, 18),
+            )
+            container.addSubview_(fb)
+            self._export_feedback = fb
+        else:
+            self._export_feedback = None
+
+    def _build_recent_sessions_card(
+        self,
+        root: NSView,
+        y: float,
+        s: UISnapshot,
+    ) -> float:
+        """Build the recent-session archive card."""
+        x = OUTER_PADDING
+        card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
+        header_h = 24
+        row_h = 22
+        visible_rows = min(len(s.recent_sessions), RECENT_SESSION_ROWS) or 1
+        note_h = 16 if s.recent_sessions else 0
+        card_h = header_h + INLINE_GAP + visible_rows * row_h + note_h + CARD_PADDING * 2
+
+        card = ColoredRectView.alloc().initWithFrame_(((x, y - card_h), (card_w, card_h)))
+        card.setColor_(_ns_color(SURFACE))
+        card.setCornerRadius_(8)
+        root.addSubview_(card)
+
+        cy = y - CARD_PADDING
+        header = _make_label(
+            "Recent sessions",
+            NSFont.systemFontOfSize_(LABEL),
+            _ns_color(TEXT_PRIMARY),
+            (x + CARD_PADDING, cy - header_h, 140, header_h),
+        )
+        root.addSubview_(header)
+        cy -= header_h + INLINE_GAP
+
+        recent = list(reversed(s.recent_sessions[-RECENT_SESSION_ROWS:]))
+        container = NSView.alloc().initWithFrame_(
+            ((x + CARD_PADDING, cy - visible_rows * row_h), (card_w - 2 * CARD_PADDING, visible_rows * row_h))
+        )
+        root.addSubview_(container)
+        self._recent_sessions_container = container
+        self._rebuild_recent_sessions(container, recent)
+
+        if len(s.recent_sessions) > RECENT_SESSION_ROWS:
+            note = _make_label(
+                f"Showing latest {RECENT_SESSION_ROWS} of {len(s.recent_sessions)} archived sessions.",
+                NSFont.systemFontOfSize_(10),
+                _ns_color(TEXT_SECONDARY),
+                (x + CARD_PADDING, y - card_h + CARD_PADDING, card_w - 2 * CARD_PADDING, 14),
+            )
+            root.addSubview_(note)
+
+        return y - card_h - INLINE_GAP
+
+    def _rebuild_recent_sessions(
+        self,
+        container: NSView,
+        sessions: list[Any],
+    ) -> None:
+        for child in list(container.subviews()):
+            child.removeFromSuperview()
+
+        row_h = 22
+        if not sessions:
+            empty = _make_label(
+                "Archived sessions will appear here after you stop and save.",
+                NSFont.systemFontOfSize_(10),
+                _ns_color(TEXT_SECONDARY),
+                (0, 0, container.frame().size.width, row_h),
+            )
+            container.addSubview_(empty)
+            return
+
+        for idx, session in enumerate(sessions):
+            row_y = (len(sessions) - idx - 1) * row_h + 2
+            label = _make_label(
+                session.display_summary(),
+                NSFont.systemFontOfSize_(10),
+                _ns_color(TEXT_PRIMARY if session.has_export else TEXT_SECONDARY),
+                (0, row_y, container.frame().size.width - 120, 18),
+            )
+            container.addSubview_(label)
+
+            reveal = NSButton.alloc().initWithFrame_(((container.frame().size.width - 112, row_y - 1), (52, 20)))
+            reveal.setBezelStyle_(NSBezelStyleRounded)
+            reveal.setTarget_(self)
+            reveal.setAction_("reveal_recent_session:")
+            reveal.setTag_(idx)
+            reveal.setEnabled_(session.has_export)
+            _set_dark_button_title(reveal, "Reveal")
+            container.addSubview_(reveal)
+
+            delete_btn = NSButton.alloc().initWithFrame_(((container.frame().size.width - 56, row_y - 1), (52, 20)))
+            delete_btn.setBezelStyle_(NSBezelStyleRounded)
+            delete_btn.setTarget_(self)
+            delete_btn.setAction_("delete_recent_session:")
+            delete_btn.setTag_(idx)
+            _set_dark_button_title(delete_btn, "Delete")
+            container.addSubview_(delete_btn)
+
+    def _update_recent_sessions(self, s: UISnapshot) -> None:
+        container = self._recent_sessions_container
+        if container is None:
+            return
+        recent = list(reversed(s.recent_sessions[-RECENT_SESSION_ROWS:]))
+        self._rebuild_recent_sessions(container, recent)
+
+    def reveal_recent_session_(self, sender: Any) -> None:
+        """Reveal the selected archived session export in Finder."""
+
+        try:
+            index = int(sender.tag())
+        except Exception:
+            return
+        recent = list(reversed(self.state.snapshot_for_ui().recent_sessions[-RECENT_SESSION_ROWS:]))
+        if index < 0 or index >= len(recent):
+            return
+        session = recent[index]
+        if not session.export_path:
+            return
+        self._reveal_in_finder(session.export_path)
+
+    def delete_recent_session_(self, sender: Any) -> None:
+        """Delete the selected archived session from local history."""
+
+        try:
+            index = int(sender.tag())
+        except Exception:
+            return
+        recent = list(reversed(self.state.snapshot_for_ui().recent_sessions[-RECENT_SESSION_ROWS:]))
+        if index < 0 or index >= len(recent):
+            return
+        session = recent[index]
+        if self.state.delete_recent_session(session.session_id):
+            self.refresh()
 
     # ── Actions ─────────────────────────────────────────────────────────
 
@@ -810,7 +967,10 @@ class HRMPopover:
             else sess_mod.suggested_csv_filename()
         )
         try:
-            destination = self._save_panel_factory(suggested)
+            try:
+                destination = self._save_panel_factory(suggested, fmt)
+            except TypeError:
+                destination = self._save_panel_factory(suggested)
         except Exception:
             log.exception("Failed to open session save panel")
             self.state.mark_export_failure("Could not open the save dialog. Try again.")
@@ -836,11 +996,11 @@ class HRMPopover:
                 f"Could not save the session as {fmt.upper()}. Try again."
             )
         else:
-            self.state.mark_export_success(str(path))
+            self.state.mark_export_success(str(path), fmt)
             self._reveal_in_finder(str(path))
 
     def _reveal_in_finder(self, path: str) -> None:
-        """Reveal the saved CSV in Finder."""
+        """Reveal the saved export in Finder."""
         try:
             url = NSURL.fileURLWithPath_(path)
             NSWorkspace.sharedWorkspace().activateFileViewerSelectingURLs_([url])
@@ -1007,12 +1167,12 @@ class ColoredRectView(NSView):
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-def macos_save_panel(default_name: str) -> str | None:
-    """Return a user-selected CSV path, or ``None`` when the panel is cancelled."""
+def macos_save_panel(default_name: str, fmt: str = "csv") -> str | None:
+    """Return a user-selected export path, or ``None`` when cancelled."""
     panel = NSSavePanel.savePanel()
     panel.setNameFieldStringValue_(default_name)
     panel.setCanCreateDirectories_(True)
-    panel.setAllowedFileTypes_(["csv"])
+    panel.setAllowedFileTypes_([fmt.lower()])
     panel.setExtensionHidden_(False)
     if panel.runModal() != NSModalResponseOK:
         return None

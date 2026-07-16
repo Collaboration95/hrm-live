@@ -72,6 +72,7 @@ class TestEmptyGraphPlaceholder:
             last_csv_path=None,
             last_csv_error=None,
             pending_export=(),
+            recent_sessions=(),
             config=None,
         )
         msg = _empty_graph_placeholder(snap)
@@ -100,6 +101,7 @@ class TestEmptyGraphPlaceholder:
             last_csv_path=None,
             last_csv_error=None,
             pending_export=(),
+            recent_sessions=(),
             config={"device_name": "Polar H10"},
         )
         msg = _empty_graph_placeholder(snap)
@@ -129,6 +131,7 @@ class TestEmptyGraphPlaceholder:
             last_csv_path=None,
             last_csv_error=None,
             pending_export=(),
+            recent_sessions=(),
             config=None,
         )
         msg = _empty_graph_placeholder(snap)
@@ -157,6 +160,7 @@ class TestEmptyGraphPlaceholder:
             last_csv_path=None,
             last_csv_error=None,
             pending_export=(),
+            recent_sessions=(),
             config=None,
         )
         msg = _empty_graph_placeholder(snap)

@@ -250,9 +250,9 @@ a typical workout without manually managing files mid-flow.
 1. Should v1.x remain a menu-bar-only utility, or should a compact main window
    become available for reviewing the current/recent session? ( STILL REMAIN MENU BAR UTILITY )
 2. Should zone boundaries remain a four-zone model, or should the roadmap allow
-   a five-zone model with migration of existing configuration? LETS scrap this 5 zone model for now completely 
+   a five-zone model with migration of existing configuration? LETS scrap this 5 zone model for now completely
 3. Are audio zone alerts desirable during workouts, and what should the default
-   be so the app remains unobtrusive?( this will not be used during workouts , juist to monitor HRM , so we can ignore this 
+   be so the app remains unobtrusive?( this will not be used during workouts , juist to monitor HRM , so we can ignore this
 4. What is the supported macOS floor after v1, and which physical straps should
    form the permanent hardware test matrix?
- ( Lets ignore this question as well ) 
+ ( Lets ignore this question as well )
