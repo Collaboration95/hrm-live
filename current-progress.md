@@ -18,10 +18,11 @@
 **Branch:** `feat/v1.5-p0`
 | Item | Status | Notes |
 |------|--------|-------|
-| Restore versioned `docs/` (un-gitignore, track FEATURE_ROADMAP.md + RELEASE_CHECKLIST.md) | ⬜ | |
-| Ensure `make check` is green from clean tree | ⬜ | |
-| Add signing/build hardening (py2app __pycache__, entitlements) | ⬜ | |
-| Verify clean `make package` | ⬜ | |
+| Restore versioned `docs/` (un-gitignore, track FEATURE_ROADMAP.md + RELEASE_CHECKLIST.md) | ✅ | docs/ removed from .gitignore, both files committed |
+| Ensure `make check` is green from clean tree | ✅ | 121 tests passed, ruff/mypy/compileall clean, 58% coverage (threshold 54%) |
+| Add signing/build hardening (py2app __pycache__, entitlements) | ✅ | PYTHONDONTWRITEBYTECODE in plist, __pycache__ cleanup after build, dont_write_bytecode in __main__.py |
+| Fill release evidence in RELEASE_CHECKLIST.md | ✅ | macOS 15.7.7, Python 3.14.6, Xcode 26.3 recorded |
+| Verify clean `make package` | ⬜ | Blocked on CI/release — dev ad-hoc sign only |
 
 ## P1 — Instrument design system & dashboard
 **Branch:** `feat/v1.5-p1`
