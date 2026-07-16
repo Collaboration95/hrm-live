@@ -101,7 +101,7 @@
 ## Merge History
 | Branch | Merged | PR/Notes |
 |--------|--------|----------|
-| `feat/v1.5-p0` | ⬜ | |
+| `feat/v1.5-p0` | ✅ | Restored docs/, signing hardening, release checklist filled |
 | `feat/v1.5-p1` | ⬜ | |
 | `feat/v1.5-p2` | ⬜ | |
 | `feat/v1.5-p3` | ⬜ | |
