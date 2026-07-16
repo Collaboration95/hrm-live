@@ -77,7 +77,7 @@ def _normalize_uuid(value: str | None) -> str | object:
         return _UUID_PARSE_FAIL
     try:
         return str(UUID(str(value))).lower()
-    except (TypeError, ValueError, AttributeError):
+    except TypeError, ValueError, AttributeError:
         return _UUID_PARSE_FAIL
 
 

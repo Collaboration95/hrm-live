@@ -17,7 +17,7 @@ with a zone gauge, HR graph, and session recording.
 ## Requirements
 
 - macOS 12+ (Monterey or later)
-- Python 3.11+ for runtime; release CI tests Python 3.11 and 3.12.
+- Python 3.14 for runtime and CI.
 - A BLE heart rate monitor strap (optional — app works in disconnected mode)
 
 ## Installation
