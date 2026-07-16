@@ -276,18 +276,26 @@ def test_settings_scan_callbacks_use_injected_functions() -> None:
             self._value = value
             self.title = value
             self.enabled = True
+            self._selected_segment = 1
 
         def setStringValue_(self, value: str) -> None:
             self._value = value
 
         def setTitle_(self, value: str) -> None:
             self.title = value
+            self._value = value
 
         def stringValue(self) -> str:
             return self._value
 
         def setEnabled_(self, value: bool) -> None:
             self.enabled = value
+
+        def setSelectedSegment_(self, index: int) -> None:
+            self._selected_segment = index
+
+        def selectedSegment(self) -> int:
+            return self._selected_segment
 
     class FakePopupItem:
         def __init__(self, title: str) -> None:
