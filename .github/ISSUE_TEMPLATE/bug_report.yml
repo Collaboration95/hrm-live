@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible problem in HRM Live.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include BLE addresses, exported heart-rate data, certificates,
+        tokens, or other secrets. Use private vulnerability reporting for
+        security issues.
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: macOS and Python version
+      description: Include Python only for development runs.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Menu bar/dashboard
+        - BLE scan or connection
+        - Session recording/export
+        - Settings
+        - Packaging/install
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots (optional)

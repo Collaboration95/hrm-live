@@ -6,19 +6,32 @@ via mock/monkeypatch.  No real BleakClient is ever instantiated.
 
 import asyncio
 import threading
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import Callable
+from contextlib import suppress
+from dataclasses import dataclass
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
+from bleak.exc import BleakBluetoothNotAvailableReason
 
-from ble import (
-    parse_heart_rate,
-    _make_callback,
+from hrm_live.ble import (
+    HEART_RATE_SERVICE_UUID,
     HEART_RATE_UUID,
+    BLEManager,
+    _make_callback,
+    bluetooth_unavailable_message,
+    connection_failure_message,
+    format_discovered_device_label,
+    normalize_discovered_device,
+    parse_heart_rate,
+    scan_failure_message,
+    sort_discovered_devices,
     start_ble_background,
     stop_ble_background,
 )
-from state import AppState
-
+from hrm_live.state import AppState, DiscoveredDevice
 
 # ── Parsing ─────────────────────────────────────────────────────────────
 
@@ -66,6 +79,73 @@ def test_parse_too_short_16bit() -> None:
     assert parse_heart_rate(data) is None
 
 
+# ── Discovery helpers ───────────────────────────────────────────────────
+
+
+def test_normalize_discovered_device_for_named_device() -> None:
+    device = _device("ADDR-1", "Runner Pod")
+    advertisement = _advertisement(local_name="Runner Pod", service_uuids=[], rssi=-61)
+    discovered = normalize_discovered_device(device, advertisement)
+
+    assert discovered is not None
+    assert discovered.address == "ADDR-1"
+    assert discovered.name == "Runner Pod"
+    assert discovered.rssi == -61
+    assert discovered.heart_rate_capable is False
+
+
+def test_normalize_discovered_device_for_unnamed_hr_device() -> None:
+    device = _device("ADDR-2", None)
+    advertisement = _advertisement(
+        local_name=None,
+        service_uuids=[HEART_RATE_SERVICE_UUID],
+        rssi=-48,
+    )
+    discovered = normalize_discovered_device(device, advertisement)
+
+    assert discovered is not None
+    assert discovered.name == ""
+    assert discovered.heart_rate_capable is True
+
+
+def test_normalize_discovered_device_filters_unnamed_non_hr() -> None:
+    device = _device("ADDR-3", None)
+    advertisement = _advertisement(local_name=None, service_uuids=[], rssi=-80)
+
+    assert normalize_discovered_device(device, advertisement) is None
+
+
+def test_sort_discovered_devices_prioritizes_hr_then_rssi() -> None:
+    devices = (
+        DiscoveredDevice("ADDR-1", "Runner Pod", -61, False),
+        DiscoveredDevice("ADDR-2", "", -48, True),
+        DiscoveredDevice("ADDR-3", "Alpha", -33, True),
+    )
+
+    ordered = sort_discovered_devices(devices)
+
+    assert [device.address for device in ordered] == ["ADDR-3", "ADDR-2", "ADDR-1"]
+
+
+def test_format_discovered_device_label_uses_fallback_names() -> None:
+    unnamed_hr = DiscoveredDevice("ADDR-2", "", -48, True)
+    unnamed_ble = DiscoveredDevice("ADDR-4", "", None, False)
+
+    assert format_discovered_device_label(unnamed_hr) == "♥ Unnamed HR device (-48 dBm)"
+    assert format_discovered_device_label(unnamed_ble) == "Unnamed BLE device"
+
+
+def test_bluetooth_unavailable_messages_are_concise() -> None:
+    assert "Bluetooth is off" in bluetooth_unavailable_message(
+        BleakBluetoothNotAvailableReason.POWERED_OFF,
+        action="scan again",
+    )
+    assert scan_failure_message(RuntimeError("boom")) == "Bluetooth scan failed. Try again."
+    assert (
+        connection_failure_message(RuntimeError("boom")) == "Bluetooth connection failed. Retrying."
+    )
+
+
 # ── Callback integration ────────────────────────────────────────────────
 
 
@@ -105,23 +185,60 @@ def test_callback_ring_buffer_capped() -> None:
     assert len(state.ring_buffer) == 600
 
 
+# ── Scan controller ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_scan_worker_publishes_incremental_results() -> None:
+    state = AppState()
+    manager = BLEManager(state)
+
+    with patch("hrm_live.ble.BleakScanner", FakeScanner):
+        await manager._scan_worker(0.0)
+
+    assert state.scan_status == "complete"
+    assert state.scan_error is None
+    assert state.scan_generation >= 3
+    assert [device.address for device in state.scan_results] == ["ADDR-2", "ADDR-1"]
+    assert state.scan_results[0].name == "Polar H10"
+    assert state.scan_results[0].heart_rate_capable is True
+    assert manager.get_cached_device("ADDR-2") is not None
+
+
+@pytest.mark.asyncio
+async def test_scan_cancel_sets_cancelled_without_touching_connection() -> None:
+    state = AppState()
+    state.connection_status = "connected"
+    manager = BLEManager(state)
+
+    with patch("hrm_live.ble.BleakScanner", FakeScanner):
+        task = asyncio.create_task(manager._scan_worker(1.0))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert state.scan_status == "cancelled"
+    assert state.connection_status == "connected"
+
+
 # ── BLE loop mock tests ─────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_ble_loop_no_address() -> None:
     """BLE loop returns immediately when address is empty."""
-    from ble import ble_loop
+    import hrm_live.ble as ble_mod
 
     state = AppState()
-    await ble_loop(state, "")
+    await ble_mod.ble_loop(state, "")
     # Should not crash, should not connect
 
 
 @pytest.mark.asyncio
 async def test_ble_loop_connect_and_notify() -> None:
     """Test BLE loop with a mocked BleakClient and stop via cancellation."""
-    from ble import ble_loop
+    import hrm_live.ble as ble_mod
 
     state = AppState()
     state.config = {
@@ -136,18 +253,14 @@ async def test_ble_loop_connect_and_notify() -> None:
 
     stop_event = threading.Event()
 
-    with patch("ble.BleakClient", return_value=mock_client):
-        task = asyncio.create_task(
-            ble_loop(state, "AA:BB:CC:DD:EE:FF", stop_event)
-        )
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
+        task = asyncio.create_task(ble_mod.ble_loop(state, "AA:BB:CC:DD:EE:FF", stop_event))
         await asyncio.sleep(0.1)
         stop_event.set()
         await asyncio.sleep(0.05)
         task.cancel()
-        try:
+        with suppress(asyncio.CancelledError, StopIteration):
             await task
-        except (asyncio.CancelledError, StopIteration):
-            pass
 
     # Should have connected and set up notification
     assert mock_client.start_notify.called
@@ -159,17 +272,16 @@ async def test_ble_loop_connect_and_notify() -> None:
 
 
 def test_start_ble_background_no_address() -> None:
-    """Thread starter handles empty address gracefully and stops cleanly."""
+    """Thread starter keeps the controller loop alive without a device."""
     state = AppState()
     mgr = start_ble_background(state, "")
     assert mgr is not None
-    thread, stop_event = mgr
-    assert thread.daemon is True
-    assert thread.name == "ble-asyncio"
-    # Thread should exit quickly since address is empty
-    thread.join(timeout=2)
-    assert not thread.is_alive()
+    assert mgr.thread.daemon is True
+    assert mgr.thread.name == "ble-asyncio"
+    assert mgr.ready_event.wait(timeout=2)
+    assert mgr.thread.is_alive()
     stop_ble_background(mgr)
+    assert not mgr.thread.is_alive()
 
 
 def test_start_ble_background_creates_daemon() -> None:
@@ -181,20 +293,43 @@ def test_start_ble_background_creates_daemon() -> None:
     mock_client.__aenter__.return_value = mock_client
     mock_client.is_connected = False  # Don't enter notify loop
 
-    with patch("ble.BleakClient", return_value=mock_client):
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
         mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
         assert mgr is not None
-        thread, stop_event = mgr
-        assert thread.daemon is True
-        assert thread.name == "ble-asyncio"
+        assert mgr.thread.daemon is True
+        assert mgr.thread.name == "ble-asyncio"
+        assert mgr.ready_event.wait(timeout=2)
 
         # Wait a tiny bit for the async loop to start
         import time
+
         time.sleep(0.2)
 
         # Stop cleanly
         stop_ble_background(mgr, join_timeout=2)
-        assert not thread.is_alive()
+        assert mgr.stop_event.is_set()
+        assert not mgr.thread.is_alive()
+
+
+def test_connect_uses_cached_ble_device_when_available() -> None:
+    state = AppState()
+    mgr = start_ble_background(state, "")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.is_connected = False
+    cached_device = _device("AA:BB:CC:DD:EE:FF", "Polar H10")
+
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client) as client_ctor:
+        assert mgr.ready_event.wait(timeout=2)
+        mgr.connect("AA:BB:CC:DD:EE:FF", cached_device=cached_device)
+        import time
+
+        time.sleep(0.2)
+        stop_ble_background(mgr, join_timeout=2)
+
+    assert client_ctor.call_args is not None
+    assert client_ctor.call_args[0][0] is cached_device
 
 
 def test_stop_ble_background_none() -> None:
@@ -205,19 +340,93 @@ def test_stop_ble_background_none() -> None:
 def test_ble_loop_stops_on_stop_event() -> None:
     """The BLE loop returns when stop_event is set (not via cancellation)."""
     state = AppState()
-    stop_event = threading.Event()
-
     # Create an async mock client that keeps is_connected=True
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.is_connected = True
 
-    with patch("ble.BleakClient", return_value=mock_client):
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
         mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
         import time
+
         time.sleep(0.3)
 
         # Stop should cause ble_loop to exit on its own
         stop_ble_background(mgr, join_timeout=3)
-        thread, _ = mgr
-        assert not thread.is_alive()
+        assert mgr.stop_event.is_set()
+        assert not mgr.thread.is_alive()
+
+
+def test_stop_ble_background_cancels_loop_task() -> None:
+    """stop_ble_background asks the owning event loop to cancel the BLE task."""
+    state = AppState()
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.is_connected = True
+
+    with patch("hrm_live.ble.BleakClient", return_value=mock_client):
+        mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
+        assert mgr.ready_event.wait(timeout=2)
+        stop_ble_background(mgr, join_timeout=3)
+
+    assert mgr.stop_event.is_set()
+    assert not mgr.thread.is_alive()
+    assert mgr.task is None or mgr.task.done()
+
+
+# ── Test helpers ────────────────────────────────────────────────────────
+
+
+def _device(address: str, name: str | None = None) -> BLEDevice:
+    return BLEDevice(address, name, None)
+
+
+def _advertisement(
+    *,
+    local_name: str | None,
+    service_uuids: list[str],
+    rssi: int,
+) -> AdvertisementData:
+    return AdvertisementData(
+        local_name=local_name,
+        manufacturer_data={},
+        service_data={},
+        service_uuids=service_uuids,
+        tx_power=None,
+        rssi=rssi,
+        platform_data=(),
+    )
+
+
+@dataclass
+class FakeScanner:
+    detection_callback: Callable[[BLEDevice, AdvertisementData], None] | None = None
+    scanning_mode: str = "active"
+
+    async def __aenter__(self):
+        if self.detection_callback is not None:
+            self.detection_callback(
+                _device("ADDR-1", "Runner Pod"),
+                _advertisement(local_name="Runner Pod", service_uuids=[], rssi=-61),
+            )
+            self.detection_callback(
+                _device("ADDR-2", None),
+                _advertisement(
+                    local_name=None,
+                    service_uuids=[HEART_RATE_SERVICE_UUID],
+                    rssi=-48,
+                ),
+            )
+            self.detection_callback(
+                _device("ADDR-2", "Polar H10"),
+                _advertisement(
+                    local_name="Polar H10",
+                    service_uuids=[HEART_RATE_SERVICE_UUID],
+                    rssi=-83,
+                ),
+            )
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False

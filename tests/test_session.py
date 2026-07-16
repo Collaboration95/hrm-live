@@ -1,269 +1,183 @@
-"""Tests for session management and CSV export.
+"""Tests for session finalization and explicit CSV export."""
 
-All CSV I/O is isolated to a temporary directory via the ``tmp_session_dir``
-fixture so that tests never write to the real home directory.
-"""
+from __future__ import annotations
 
 import csv
-import os
-import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from state import AppState
-from session import start_session, record_sample, stop_session, SESSION_DIR
-
-
-# ── Fixtures ─────────────────────────────────────────────────────────────
+import hrm_live.session as session
+from hrm_live.state import AppState
 
 
 @pytest.fixture
 def state() -> AppState:
     s = AppState()
-    s.config = {
-        "max_hr": 190,
-        "zones": {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88},
-    }
+    s.set_config(
+        {
+            "max_hr": 190,
+            "zones": {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88},
+        }
+    )
     return s
 
 
-@pytest.fixture
-def tmp_session_dir() -> Path:
-    """Provide a temporary session directory and patch SESSION_DIR."""
-    with tempfile.TemporaryDirectory() as d:
-        target = Path(d) / "sessions"
-        target.mkdir(parents=True, exist_ok=True)
-        with patch("session.SESSION_DIR", target):
-            yield target
+def _ts(seconds: int) -> datetime:
+    return datetime(2026, 7, 15, 10, 0, seconds, tzinfo=UTC)
 
 
-# ── Start ───────────────────────────────────────────────────────────────
+def test_start_session_resets_completed_export(state: AppState) -> None:
+    session.start_session(state, clock=lambda: _ts(0))
+    session.record_sample(state, _ts(0), 130)
+    assert session.finalize_session(state) is not None
 
-
-def test_start_session_resets(state: AppState) -> None:
-    # Set some previous session data
-    state.session_max = 150
-    state.session_min = 60
-    state.session_sum = 1000
-    state.session_count = 10
-    state.session_data = [(datetime.now(timezone.utc), 120)]
-    state.zone_times = {"Z1": 10, "Z2": 20, "Z3": 5, "Z4": 0}
-
-    start_session(state)
+    session.start_session(state, clock=lambda: _ts(10))
 
     assert state.session_active is True
-    assert state.session_start is not None
+    assert state.session_start == _ts(10)
     assert state.session_data == []
+    assert state.session_count == 0
     assert state.session_max == 0
     assert state.session_min == 999
-    assert state.session_sum == 0
-    assert state.session_count == 0
-    assert state.zone_times == {"Z1": 0, "Z2": 0, "Z3": 0, "Z4": 0}
-    assert state.last_csv_path is None
-    assert state.last_csv_error is None
+    assert state.zone_times == {"Z1": 0.0, "Z2": 0.0, "Z3": 0.0, "Z4": 0.0}
+    assert session.retryable_export(state) is None
 
 
-# ── Record ──────────────────────────────────────────────────────────────
+def test_finalize_no_active_session_returns_pending_export(state: AppState) -> None:
+    assert session.finalize_session(state) is None
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    snapshot = session.finalize_session(state)
+    assert session.finalize_session(state) is snapshot
 
 
-def test_record_noop_when_inactive(state: AppState) -> None:
-    state.session_active = False
-    record_sample(state, datetime.now(timezone.utc), 120)
-    assert state.session_count == 0
-
-
-def test_record_basic(state: AppState) -> None:
-    start_session(state)
-    ts = datetime.now(timezone.utc)
-    record_sample(state, ts, 120)
-    assert state.session_count == 1
-    assert state.session_sum == 120
-    assert state.session_max == 120
-    assert state.session_min == 120
-    assert len(state.session_data) == 1
-
-
-def test_record_updates_stats(state: AppState) -> None:
-    start_session(state)
-    for bpm in [60, 80, 100, 120, 140]:
-        record_sample(state, datetime.now(timezone.utc), bpm)
-    assert state.session_count == 5
-    assert state.session_sum == 500
-    assert state.session_max == 140
-    assert state.session_min == 60
-
-
-def test_record_out_of_range_ignored(state: AppState) -> None:
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 10)  # too low
-    record_sample(state, datetime.now(timezone.utc), 300)  # too high
-    assert state.session_count == 0
-
-
-def test_record_zone_times(state: AppState) -> None:
-    """Zone time increments for samples in different zones."""
-    start_session(state)
-    # Z1: < 60% of 190 = < 114
-    record_sample(state, datetime.now(timezone.utc), 100)
-    # Z2: 114-142.5
-    record_sample(state, datetime.now(timezone.utc), 130)
-    # Z3: 142.5-167.2
-    record_sample(state, datetime.now(timezone.utc), 150)
-    # Z4: > 167.2
-    record_sample(state, datetime.now(timezone.utc), 180)
-    assert state.zone_times["Z1"] == 1
-    assert state.zone_times["Z2"] == 1
-    assert state.zone_times["Z3"] == 1
-    assert state.zone_times["Z4"] == 1
-
-
-# ── Stop ────────────────────────────────────────────────────────────────
-
-
-def test_stop_no_active_session(state: AppState) -> None:
-    result = stop_session(state)
-    assert result is None
-
-
-def test_stop_no_samples(state: AppState) -> None:
-    start_session(state)
-    result = stop_session(state)
-    assert result is None
+def test_finalize_empty_session_does_not_create_export(state: AppState) -> None:
+    session.start_session(state)
+    assert session.finalize_session(state) is None
     assert state.session_active is False
+    assert session.retryable_export(state) is None
 
 
-def test_stop_and_csv_export(state: AppState, tmp_session_dir: Path) -> None:
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 130)
-    record_sample(state, datetime.now(timezone.utc), 150)
-    record_sample(state, datetime.now(timezone.utc), 180)
+def test_explicit_csv_export_preserves_historical_zones(state: AppState, tmp_path: Path) -> None:
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    state.set_config(
+        {
+            "max_hr": 220,
+            "zones": {"z1_max": 0.80, "z2_max": 0.85, "z3_max": 0.90},
+        }
+    )
+    session.record_sample(state, _ts(1), 130)
+    snapshot = session.finalize_session(state)
 
-    result = stop_session(state)
-    assert result is not None
-    assert result.endswith(".csv")
-    assert state.session_active is False
-    assert state.last_csv_path is not None
-    assert state.last_csv_error is None
+    assert snapshot is not None
+    path = session.export_session_csv(snapshot, tmp_path / "workout")
 
-    # Verify CSV content
-    path = Path(result)
-    assert path.exists()
-    assert path.parent == tmp_session_dir
-    with open(path, "r") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
-    assert len(rows) == 4  # header + 3 samples
+    assert path == tmp_path / "workout.csv"
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
     assert rows[0] == ["timestamp", "bpm", "zone"]
-    # Second row should have ts, bpm, zone
-    assert len(rows[1]) == 3
-    assert rows[1][1] == "130"
-    assert rows[1][2] == "Z2"  # 130/190 ≈ 68.4% → Z2
-    # Last row
-    assert rows[3][1] == "180"
-    assert rows[3][2] == "Z4"
+    assert rows[1][1:] == ["130", "Z2"]
+    assert rows[2][1:] == ["130", "Z1"]
 
 
-def test_stop_stats_remain_after_stop(state: AppState,
-                                      tmp_session_dir: Path) -> None:
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 130)
-    record_sample(state, datetime.now(timezone.utc), 150)
-    stop_session(state)
-
-    # Stats remain visible
-    assert state.session_max == 150
-    assert state.session_min == 130
-    assert state.session_sum == 280
-    assert state.session_count == 2
+def test_export_requires_non_empty_snapshot(state: AppState, tmp_path: Path) -> None:
+    session.start_session(state)
+    assert session.finalize_session(state) is None
+    with pytest.raises(AttributeError):
+        session.export_session_csv(None, tmp_path / "x.csv")  # type: ignore[arg-type]
 
 
-def test_new_session_clears_previous_stats(state: AppState,
-                                           tmp_session_dir: Path) -> None:
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 130)
-    stop_session(state)
+def test_delta_accounting_assigns_time_to_previous_zone(state: AppState) -> None:
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 100)
+    session.record_sample(state, _ts(3), 150)
+    session.record_sample(state, _ts(5), 180)
 
-    # New session
-    start_session(state)
-    assert state.session_count == 0
-    assert state.session_max == 0
-    assert state.session_min == 999
+    assert state.zone_times["Z1"] == 3.0
+    assert state.zone_times["Z3"] == 2.0
+    assert state.zone_times["Z4"] == 0.0
 
 
-# ── CSV collision ───────────────────────────────────────────────────────
+def test_gap_accounting_is_clamped(state: AppState) -> None:
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 100)
+    session.record_sample(state, _ts(30), 130)
+
+    assert state.zone_times["Z1"] == 5.0
 
 
-def test_csv_filename_collision(state: AppState,
-                                tmp_session_dir: Path) -> None:
-    """Two sessions stopped in the same minute get different filenames."""
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 130)
-    p1 = Path(stop_session(state))
+def test_invalid_bpm_and_backward_timestamp_are_ignored(state: AppState) -> None:
+    session.start_session(state)
+    session.record_sample(state, _ts(10), 120)
+    session.record_sample(state, _ts(11), 10)
+    session.record_sample(state, _ts(9), 130)
 
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 140)
-    p2 = Path(stop_session(state))
-
-    assert p1 != p2
-    assert p1.exists()
-    assert p2.exists()
-    assert p1.parent == tmp_session_dir
-    assert p2.parent == tmp_session_dir
+    assert state.session_count == 1
+    assert [sample.bpm for sample in state.session_data] == [120]
+    assert state.latest_bpm == 120
+    assert [bpm for _, bpm in state.ring_buffer] == [120]
 
 
-# ── Session directory ───────────────────────────────────────────────────
+def test_write_failure_keeps_retryable_snapshot(state: AppState, tmp_path: Path) -> None:
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    snapshot = session.finalize_session(state)
+    assert snapshot is not None
+
+    destination = tmp_path / "export.csv"
+    with patch("os.fsync", side_effect=OSError("disk full")), pytest.raises(OSError):
+        session.export_session_csv(snapshot, destination)
+
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == []
+    assert session.retryable_export(state) is snapshot
 
 
-def test_session_dir_created(state: AppState) -> None:
-    """Session directory is created on first stop."""
-    with tempfile.TemporaryDirectory() as d:
-        with patch("session.SESSION_DIR", Path(d) / "sessions"):
-            start_session(state)
-            record_sample(state, datetime.now(timezone.utc), 130)
-            path = stop_session(state)
-            assert path is not None
-            assert Path(path).parent.exists()
+def test_cancel_semantics_are_retryable_without_error(state: AppState) -> None:
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    snapshot = session.finalize_session(state)
 
-
-# ── CSV write failure ───────────────────────────────────────────────────
-
-
-def test_csv_write_failure_handled(state: AppState) -> None:
-    """When CSV cannot be written, error is recorded and None returned."""
-
-    # Patch open to raise PermissionError
-    original_open = open
-
-    def failing_open(*args, **kwargs):
-        raise PermissionError("Permission denied")
-
-    start_session(state)
-    record_sample(state, datetime.now(timezone.utc), 130)
-
-    with patch("builtins.open", failing_open):
-        result = stop_session(state)
-
-    assert result is None
+    assert snapshot is not None
     assert state.last_csv_path is None
-    assert state.last_csv_error is not None
-    assert "Permission denied" in state.last_csv_error
+    assert state.last_csv_error is None
+    assert session.retryable_export(state) is snapshot
 
 
-def test_csv_mkdir_failure_handled(state: AppState) -> None:
-    """When SESSION_DIR cannot be created, error is recorded."""
+def test_successful_export_state_is_not_retryable(state: AppState) -> None:
+    """A completed save clears in-memory retry data but retains its path."""
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    assert session.finalize_session(state) is not None
 
-    with tempfile.TemporaryDirectory() as d:
-        # Create a file at the path where the directory would be
-        dead_path = Path(d) / "sessions"
-        dead_path.write_text("not a directory")
-        with patch("session.SESSION_DIR", dead_path):
-            start_session(state)
-            record_sample(state, datetime.now(timezone.utc), 130)
-            result = stop_session(state)
+    state.mark_export_success("/tmp/workout.csv")
 
-    assert result is None
-    assert state.last_csv_path is None
-    assert state.last_csv_error is not None
+    snapshot = state.snapshot_for_ui()
+    assert session.retryable_export(state) is None
+    assert snapshot.pending_export == ()
+    assert snapshot.last_csv_path == "/tmp/workout.csv"
+    assert snapshot.last_csv_error is None
+
+
+def test_export_replace_overwrite_is_complete(state: AppState, tmp_path: Path) -> None:
+    destination = tmp_path / "existing.csv"
+    destination.write_text("old partial data", encoding="utf-8")
+    session.start_session(state)
+    session.record_sample(state, _ts(0), 130)
+    snapshot = session.finalize_session(state)
+    assert snapshot is not None
+
+    session.export_session_csv(snapshot, destination)
+
+    assert "old partial data" not in destination.read_text(encoding="utf-8")
+
+
+def test_suggested_filename_is_readable() -> None:
+    def clock() -> datetime:
+        return datetime(2026, 7, 15, 18, 30, tzinfo=UTC)
+
+    assert session.suggested_csv_filename(clock=clock) == "HRM Live 2026-07-15 18-30.csv"

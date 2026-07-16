@@ -1,16 +1,14 @@
 """Tests for graph rendering."""
 
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-import pytest
-
-from ui.graph import render_graph
+from hrm_live.ui.graph import render_graph
 
 
 def _make_ring_buffer(bpms: list[int], start_bpm: int = 60) -> deque:
     """Helper: build a ring buffer with sequential BPM values."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rb = deque(maxlen=600)
     for i, bpm in enumerate(bpms):
         rb.append((now.replace(second=i % 60), bpm))
@@ -56,6 +54,13 @@ def test_render_custom_zones() -> None:
     rb = _make_ring_buffer([120])
     zones = {"z1_max": 0.50, "z2_max": 0.70, "z3_max": 0.90}
     result = render_graph(rb, zones=zones)
+    if result is not None:
+        assert isinstance(result, bytes)
+
+
+def test_render_partial_zones_uses_defaults() -> None:
+    rb = _make_ring_buffer([120])
+    result = render_graph(rb, zones={})
     if result is not None:
         assert isinstance(result, bytes)
 

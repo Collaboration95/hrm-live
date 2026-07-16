@@ -14,17 +14,21 @@ from __future__ import annotations
 
 import io
 import logging
-from collections import deque
-from datetime import datetime, timedelta, timezone
-from typing import Any
+import os
+import tempfile
+from collections.abc import Sequence
+from datetime import timedelta
+from pathlib import Path
+
+_MPLCONFIGDIR = Path(tempfile.gettempdir()) / "hrm-live-matplotlib"
+_MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(_MPLCONFIGDIR))
 
 import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.patches import FancyBboxPatch
 
-from zones import ZONE_ORDER
+matplotlib.use("Agg")
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 
@@ -35,10 +39,11 @@ _ZONE_BAND_COLORS = {
     "Z3": "#ffcc80",
     "Z4": "#ef9a9a",
 }
+_DEFAULT_ZONES = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
 
 
 def render_graph(
-    ring_buffer: deque,
+    ring_buffer: Sequence,
     max_hr: int = 190,
     window_minutes: int = 10,
     zones: dict[str, float] | None = None,
@@ -66,10 +71,11 @@ def render_graph(
     if not ring_buffer or len(ring_buffer) < 1:
         return None
 
-    if zones is None:
-        zones = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
-    if zone_colors is None:
-        zone_colors = _ZONE_BAND_COLORS
+    # Accept partial dictionaries as well as None. UI state can be observed
+    # while configuration is being replaced, so rendering must not assume all
+    # nested keys are present.
+    zones = {**_DEFAULT_ZONES, **(zones or {})}
+    zone_colors = {**_ZONE_BAND_COLORS, **(zone_colors or {})}
 
     now = ring_buffer[-1][0]
 
@@ -94,14 +100,30 @@ def render_graph(
     ax.set_facecolor("#1e1e1e")
 
     # Zone bands (fill between)
-    ax.axhspan(0, z1_bpm, facecolor=zone_colors.get("Z1", _ZONE_BAND_COLORS["Z1"]),
-               alpha=0.25, zorder=0)
-    ax.axhspan(z1_bpm, z2_bpm, facecolor=zone_colors.get("Z2", _ZONE_BAND_COLORS["Z2"]),
-               alpha=0.25, zorder=0)
-    ax.axhspan(z2_bpm, z3_bpm, facecolor=zone_colors.get("Z3", _ZONE_BAND_COLORS["Z3"]),
-               alpha=0.25, zorder=0)
-    ax.axhspan(z3_bpm, max_hr * 1.15, facecolor=zone_colors.get("Z4", _ZONE_BAND_COLORS["Z4"]),
-               alpha=0.25, zorder=0)
+    ax.axhspan(
+        0, z1_bpm, facecolor=zone_colors.get("Z1", _ZONE_BAND_COLORS["Z1"]), alpha=0.25, zorder=0
+    )
+    ax.axhspan(
+        z1_bpm,
+        z2_bpm,
+        facecolor=zone_colors.get("Z2", _ZONE_BAND_COLORS["Z2"]),
+        alpha=0.25,
+        zorder=0,
+    )
+    ax.axhspan(
+        z2_bpm,
+        z3_bpm,
+        facecolor=zone_colors.get("Z3", _ZONE_BAND_COLORS["Z3"]),
+        alpha=0.25,
+        zorder=0,
+    )
+    ax.axhspan(
+        z3_bpm,
+        max_hr * 1.15,
+        facecolor=zone_colors.get("Z4", _ZONE_BAND_COLORS["Z4"]),
+        alpha=0.25,
+        zorder=0,
+    )
 
     # Zone boundary lines (dashed)
     for bpm_val, color in [(z1_bpm, "#888888"), (z2_bpm, "#888888"), (z3_bpm, "#888888")]:

@@ -1,16 +1,15 @@
 """Tests for config load/save/validation."""
 
 import json
-import os
 import tempfile
 from pathlib import Path
 
 import pytest
 
-import config as cfg_mod
-
+import hrm_live.config as cfg_mod
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def temp_config_path() -> Path:
@@ -21,9 +20,11 @@ def temp_config_path() -> Path:
 
 # ── Defaults ────────────────────────────────────────────────────────────
 
+
 def test_default_config_values() -> None:
     cfg = cfg_mod.load_config(path=Path("/nonexistent/config.json"))
     assert cfg["device_address"] == ""
+    assert cfg["device_name"] == ""
     assert cfg["max_hr"] == 190
     assert cfg["zones"]["z1_max"] == 0.60
     assert cfg["zones"]["z2_max"] == 0.75
@@ -44,11 +45,13 @@ def test_save_and_load(temp_config_path: Path) -> None:
     config = cfg_mod.load_config(path=temp_config_path)
     config["max_hr"] = 175
     config["device_address"] = "AA:BB:CC:DD:EE:FF"
+    config["device_name"] = "Polar H10"
     cfg_mod.save_config(config, path=temp_config_path)
 
     loaded = cfg_mod.load_config(path=temp_config_path)
     assert loaded["max_hr"] == 175
     assert loaded["device_address"] == "AA:BB:CC:DD:EE:FF"
+    assert loaded["device_name"] == "Polar H10"
     assert loaded["zones"]["z1_max"] == 0.60  # unchanged
 
 
@@ -57,6 +60,7 @@ def test_save_creates_directory(temp_config_path: Path) -> None:
     parent = temp_config_path.parent
     if parent.exists():
         import shutil
+
         shutil.rmtree(parent)
     assert not parent.exists()
     cfg_mod.save_config(cfg_mod.load_config(path=temp_config_path), path=temp_config_path)
@@ -65,6 +69,7 @@ def test_save_creates_directory(temp_config_path: Path) -> None:
 
 
 # ── Malformed JSON ──────────────────────────────────────────────────────
+
 
 def test_malformed_json_returns_defaults(temp_config_path: Path) -> None:
     temp_config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +82,30 @@ def test_malformed_json_returns_defaults(temp_config_path: Path) -> None:
     # The original file is no longer at config.json
     assert not temp_config_path.exists()
     corrupt_files = sorted(temp_config_path.parent.glob("*corrupt*"))
-    assert len(corrupt_files) >= 1, f"Expected corrupt files, found: {list(temp_config_path.parent.iterdir())}"
+    assert len(corrupt_files) >= 1, (
+        f"Expected corrupt files, found: {list(temp_config_path.parent.iterdir())}"
+    )
+
+
+@pytest.mark.parametrize(
+    "saved",
+    [
+        [],
+        {"max_hr": 0},
+        {"zones": "not-an-object"},
+        {"zone_colors": ["#888888"]},
+    ],
+)
+def test_semantically_invalid_config_is_quarantined(temp_config_path: Path, saved: object) -> None:
+    """Valid JSON cannot bypass validation and crash the menu-bar app later."""
+    temp_config_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_config_path.write_text(json.dumps(saved), encoding="utf-8")
+
+    cfg = cfg_mod.load_config(path=temp_config_path)
+
+    assert cfg == cfg_mod.DEFAULT_CONFIG
+    assert not temp_config_path.exists()
+    assert list(temp_config_path.parent.glob("config.json.corrupt*"))
 
 
 def test_empty_json_returns_defaults(temp_config_path: Path) -> None:
@@ -87,25 +115,23 @@ def test_empty_json_returns_defaults(temp_config_path: Path) -> None:
     cfg = cfg_mod.load_config(path=temp_config_path)
     assert cfg["max_hr"] == 190
     assert cfg["device_address"] == ""
+    assert cfg["device_name"] == ""
 
 
 def test_partial_config_merges_with_defaults(temp_config_path: Path) -> None:
     temp_config_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_config_path.write_text(
-        json.dumps({"max_hr": 180}), encoding="utf-8"
-    )
+    temp_config_path.write_text(json.dumps({"max_hr": 180}), encoding="utf-8")
 
     cfg = cfg_mod.load_config(path=temp_config_path)
     assert cfg["max_hr"] == 180
     assert cfg["zones"]["z1_max"] == 0.60  # default
     assert cfg["device_address"] == ""  # default
+    assert cfg["device_name"] == ""  # default
 
 
 def test_extra_keys_ignored(temp_config_path: Path) -> None:
     temp_config_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_config_path.write_text(
-        json.dumps({"max_hr": 200, "future_key": "v2"}), encoding="utf-8"
-    )
+    temp_config_path.write_text(json.dumps({"max_hr": 200, "future_key": "v2"}), encoding="utf-8")
 
     cfg = cfg_mod.load_config(path=temp_config_path)
     assert cfg["max_hr"] == 200
@@ -114,52 +140,121 @@ def test_extra_keys_ignored(temp_config_path: Path) -> None:
     assert "future_key" in cfg  # preserved, not harmful
 
 
+def test_device_address_can_be_uuid_string(temp_config_path: Path) -> None:
+    cfg = cfg_mod.load_config(path=temp_config_path)
+    cfg["device_address"] = "7A6B6C7D-8E8F-9091-A1B2-C3D4E5F60708"
+    cfg["device_name"] = "Chest Strap"
+    cfg_mod.save_config(cfg, path=temp_config_path)
+
+    loaded = cfg_mod.load_config(path=temp_config_path)
+    assert loaded["device_address"] == "7A6B6C7D-8E8F-9091-A1B2-C3D4E5F60708"
+    assert loaded["device_name"] == "Chest Strap"
+
+
 # ── Validation ──────────────────────────────────────────────────────────
+
 
 def test_validate_max_hr_zero() -> None:
     with pytest.raises(ValueError, match="max_hr"):
-        cfg_mod.save_config({"max_hr": 0, "zones": cfg_mod.DEFAULT_CONFIG["zones"],
-                             "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
-                             "graph_window_minutes": 10, "device_address": ""},
-                            path=Path("/tmp/_test_invalid.json.tmp"))
+        cfg_mod.save_config(
+            {
+                "max_hr": 0,
+                "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+                "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+                "graph_window_minutes": 10,
+                "device_address": "",
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
 
 
 def test_validate_max_hr_negative() -> None:
     with pytest.raises(ValueError, match="max_hr"):
-        cfg_mod.save_config({"max_hr": -10, "zones": cfg_mod.DEFAULT_CONFIG["zones"],
-                             "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
-                             "graph_window_minutes": 10, "device_address": ""},
-                            path=Path("/tmp/_test_invalid.json.tmp"))
+        cfg_mod.save_config(
+            {
+                "max_hr": -10,
+                "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+                "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+                "graph_window_minutes": 10,
+                "device_address": "",
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
 
 
 def test_validate_non_monotonic_zones() -> None:
     with pytest.raises(ValueError, match="zone boundaries"):
-        cfg_mod.save_config({
-            "max_hr": 190,
-            "zones": {"z1_max": 0.80, "z2_max": 0.60, "z3_max": 0.88},
-            "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
-            "graph_window_minutes": 10, "device_address": "",
-        }, path=Path("/tmp/_test_invalid.json.tmp"))
+        cfg_mod.save_config(
+            {
+                "max_hr": 190,
+                "zones": {"z1_max": 0.80, "z2_max": 0.60, "z3_max": 0.88},
+                "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+                "graph_window_minutes": 10,
+                "device_address": "",
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
 
 
 def test_validate_invalid_color() -> None:
     with pytest.raises(ValueError, match="zone_colors"):
-        cfg_mod.save_config({
-            "max_hr": 190,
-            "zones": cfg_mod.DEFAULT_CONFIG["zones"],
-            "zone_colors": {"Z1": "not-a-color", "Z2": "#4CAF50", "Z3": "#FF9800", "Z4": "#F44336"},
-            "graph_window_minutes": 10, "device_address": "",
-        }, path=Path("/tmp/_test_invalid.json.tmp"))
+        cfg_mod.save_config(
+            {
+                "max_hr": 190,
+                "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+                "zone_colors": {
+                    "Z1": "not-a-color",
+                    "Z2": "#4CAF50",
+                    "Z3": "#FF9800",
+                    "Z4": "#F44336",
+                },
+                "graph_window_minutes": 10,
+                "device_address": "",
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
+
+
+def test_validate_device_fields_must_be_strings() -> None:
+    with pytest.raises(ValueError, match="device_address"):
+        cfg_mod.save_config(
+            {
+                "device_address": 123,
+                "device_name": "",
+                "max_hr": 190,
+                "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+                "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+                "graph_window_minutes": 10,
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
+
+    with pytest.raises(ValueError, match="device_name"):
+        cfg_mod.save_config(
+            {
+                "device_address": "",
+                "device_name": 123,
+                "max_hr": 190,
+                "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+                "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+                "graph_window_minutes": 10,
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
 
 
 def test_validate_graph_window_zero() -> None:
     with pytest.raises(ValueError, match="graph_window_minutes"):
-        cfg_mod.save_config({
-            "max_hr": 190,
-            "zones": cfg_mod.DEFAULT_CONFIG["zones"],
-            "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
-            "graph_window_minutes": 0, "device_address": "",
-        }, path=Path("/tmp/_test_invalid.json.tmp"))
+        cfg_mod.save_config(
+            {
+                "max_hr": 190,
+                "zones": cfg_mod.DEFAULT_CONFIG["zones"],
+                "zone_colors": cfg_mod.DEFAULT_CONFIG["zone_colors"],
+                "graph_window_minutes": 0,
+                "device_address": "",
+            },
+            path=Path("/tmp/_test_invalid.json.tmp"),
+        )
 
 
 def test_valid_config_saves(temp_config_path: Path) -> None:
@@ -171,6 +266,7 @@ def test_valid_config_saves(temp_config_path: Path) -> None:
 
 
 # ── Config dir creation ─────────────────────────────────────────────────
+
 
 def test_save_creates_config_dir_implicit() -> None:
     """save_config creates the config directory on save."""
