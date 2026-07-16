@@ -116,6 +116,13 @@ class HRMBarApp(rumps.App):
 
         self._set_dual_colour_title(text_part, dot_char, zone_col if s.connected else dot_color)
 
+        log.debug(
+            "Menu tick: status=%s, bpm=%s, zone=%s",
+            s.connection_status,
+            s.latest_bpm,
+            zone,
+        )
+
         # Accessibility
         a11y_label = menu_accessibility_label(
             s.latest_bpm if s.connected else None,
