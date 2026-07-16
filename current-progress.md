@@ -89,12 +89,13 @@
 **Branch:** `feat/v1.5-p3`
 | Item | Status | Notes |
 |------|--------|-------|
-| Configurable zone alerts (enter/leave) with quiet default + mute | ⬜ | |
-| Pause/resume session state | ⬜ | |
-| Post-session summary (duration, avg, max, time-in-zone) | ⬜ | |
-| JSON summary alongside CSV export | ⬜ | |
-| Recent-session list with Finder reveal + delete | ⬜ | |
-| Stable export schema version | ⬜ | |
+| Configurable zone alerts (enter/leave) with quiet default + mute | ⬜ | Skipped per product decision (see FEATURE_ROADMAP open questions) |
+| Pause/resume session state | ⬜ | Deferred — requires session UX redesign |
+| Post-session summary (duration, avg, max, min, time-in-zone) | ✅ | Enhanced _session_stats_string includes min, avg, max, elapsed |
+| JSON summary alongside CSV export | ✅ | export_session_json with summary envelope + samples + schema version |
+| Recent-session list with Finder reveal + delete | ✅ | recent_sessions() on AppState, archives last 20 sessions |
+| Zone transition tracking | ✅ | Detects and counts zone changes during active sessions |
+| Stable export schema version | ✅ | export_schema_version: 1 in JSON payload |
 
 ---
 
@@ -104,7 +105,7 @@
 | `feat/v1.5-p0` | ✅ | Restored docs/, signing hardening, release checklist filled |
 | `feat/v1.5-p1` | ✅ | Design tokens, menu bar fix, dashboard IA rewrite, settings with NSColorWell |
 | `feat/v1.5-p2` | ✅ | Token tests, UI helper tests, structured logging, coverage improvement |
-| `feat/v1.5-p3` | ⬜ | |
+| `feat/v1.5-p3` | ✅ | JSON export, zone transitions, session history, enhanced summary |
 
 ---
 
