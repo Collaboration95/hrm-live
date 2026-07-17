@@ -1,0 +1,407 @@
+HRM Live — Next Feature Release Roadmap
+========================================
+
+Working name: v1.6 “Session Confidence”
+Planning status: draft for product and engineering review
+Created: 2026-07-16
+
+Purpose
+-------
+
+v1.5 established the visual direction: an instrument-like menu-bar dashboard,
+design tokens, native colour editing, CSV/JSON export, and the beginnings of
+recent sessions. The next release should make that foundation trustworthy in
+daily use: sessions must survive app restarts, exports must be easy to find,
+Bluetooth failure states must be understandable, and the polished interface
+must be verified rather than inferred.
+
+Product position
+----------------
+
+HRM Live remains a focused, local-first macOS menu-bar utility. It is for
+watching a Bluetooth heart-rate strap and retaining simple fitness records; it
+is not a training platform, social network, cloud service, or medical device.
+
+Design north star: Teenage Engineering-style clarity.
+
+* One primary reading, no competing numbers.
+* Dark, warm, tactile instrument surfaces; colour carries meaning but is never
+  the only cue.
+* Deliberate spacing, restrained controls, and immediate feedback.
+* “What is happening?” is always clear: connection, recording, saved state,
+  and failures have plain-language labels.
+
+Release goal and non-goals
+--------------------------
+
+Goal: ship v1.6 as a stable, signed, notarized release whose core workflow is
+reliable:
+
+  connect strap -> see reading -> record -> stop -> review -> export -> find
+
+Not in v1.6:
+
+* Cloud sync, accounts, analytics, social sharing, or a mobile app.
+* Five-zone migration (retain the current four-zone configuration).
+* Audio workout coaching/alerts.
+* Sophisticated workout plans or medical/health claims.
+
+Priority 0 — Release confidence and regression closure
+-------------------------------------------------------
+
+Objective: make each release candidate reproducible, inspectable, and safe to
+hand to a real user.
+
+1. Create a release-candidate checklist that is tied to a commit SHA and
+   artifact checksum. It must record:
+
+   * `make check`, clean `make package`, and `make verify-bundle` results.
+   * macOS version, Xcode version, Python version, and exact commit.
+   * Developer ID signing, notarization submission/result, stapling, and
+     Gatekeeper assessment.
+   * Manual Bluetooth test with at least two representative straps, including
+     reconnect, sleep/wake, and device-off cases.
+   * Manual UI acceptance for light/dark appearance and larger text.
+
+2. Replace stale documentation claims.
+
+   * Keep README, `pyproject.toml`, CI, and release checklist on one supported
+     Python version (currently 3.14).
+   * Update README to describe JSON export, saved session history, and the
+     actual dashboard controls.
+   * Maintain a human-readable `CHANGELOG.md` under “Unreleased” while work is
+     in flight; cut a dated v1.6 section only at release time.
+
+3. Add a narrow smoke-test command for release candidates.
+
+   * Start the app with a deterministic simulated sample source.
+   * Record a short session, switch graph range, stop it, save CSV and JSON,
+     reopen the app, and confirm the session appears in history.
+   * Exercise a failed/cancelled save and verify retry controls remain visible.
+
+Exit criteria:
+
+* A clean macOS runner produces and verifies an app bundle.
+* The signed artifact passes `codesign`, `spctl`, notarization, and stapling.
+* The release evidence is complete for the exact artifact, not copied forward.
+
+Priority 1 — Durable local session library
+------------------------------------------
+
+Why: “last 20 sessions” is only valuable if it persists and supports the
+user’s next action. A process-local list is a useful prototype, not user-facing
+history.
+
+Deliverables:
+
+1. Introduce a versioned local session store.
+
+   * Store a compact session index under `~/.config/hrm/` (or an application
+     support directory chosen and documented once).
+   * Keep summary metadata, zone durations, transition count, notes, export
+     paths, and schema version; keep raw samples only when the user explicitly
+     chooses to retain them.
+   * Use atomic writes and recovery from malformed/corrupt storage.
+   * Retain the most recent 20 sessions by default, with a clear user control
+     for deleting individual items and clearing all history.
+
+2. Make history a real dashboard surface.
+
+   * Add a compact “Recent sessions” card: date/time, duration, average BPM,
+     maximum BPM, and export state.
+   * Reveal an existing export in Finder; show a disabled explanatory state
+     when no export exists or a file was moved.
+   * Delete only the local history record by default. If an export exists,
+     offer a clearly worded optional “also move export to Trash” action.
+   * Reopen a historical session summary without starting a new recording.
+
+3. Improve export semantics.
+
+   * Let one completed session produce both CSV and JSON; do not discard the
+     retryable snapshot after the first format succeeds.
+   * Show file type and success message after saving, with “Reveal in Finder.”
+   * Pass CSV/JSON type explicitly to NSSavePanel so the extension and picker
+     match the chosen action.
+   * Include zone-transition count and app/export schema versions in JSON.
+   * Add a JSON schema document and fixture-based compatibility tests.
+
+4. Add a short optional session note.
+
+   * Plain text, local-only, max length and character rules documented.
+   * Enter it after stop or from the history detail; never log its contents.
+   * Keep the feature intentionally small—no tags, cloud sync, or search in
+     this release.
+
+Acceptance examples:
+
+* Quit/relaunch after recording: the session still appears in Recent sessions.
+* Export CSV, then JSON from the same completed session; both paths are shown.
+* Moving an export outside Finder produces a useful “file unavailable” state.
+* Deleting a history item does not silently delete an export file.
+
+Priority 2 — Connection confidence and recording control
+---------------------------------------------------------
+
+Why: the app is only as calm as it is during ordinary Bluetooth failures.
+
+Deliverables:
+
+1. Explicit connection state model.
+
+   States: No device configured, scanning, connecting, connected, reconnecting,
+   Bluetooth unavailable, permission required, strap unavailable, and error.
+
+   Each state needs:
+
+   * A concise menu-bar label/icon and accessible description.
+   * Dashboard explanation and one relevant action (for example “Open
+     Settings”, “Scan again”, or “Retry”).
+   * No raw BLE address in visible UI or default logs.
+
+2. Reconnection behaviour.
+
+   * Bounded exponential retry with visible but non-alarming status.
+   * Cancel retries while the user intentionally changes device/configuration.
+   * Reset stale presentation state when reconnecting, while preserving an
+     active session and recording a capped gap correctly.
+   * Add deterministic tests for disconnect/reconnect and sleep/wake paths.
+
+3. Recording controls.
+
+   * Add Pause / Resume only if its state machine, UI, export format, and
+     duration semantics are designed together.
+   * When paused, retain the session but exclude paused time from duration;
+     make state visible in the menu bar and dashboard.
+   * If not ready, defer it rather than adding a misleading button. The
+     durable-history work has higher user value.
+
+Acceptance examples:
+
+* Bluetooth disabled during an active session results in a clear status,
+  automatic bounded reconnection, and no inflated time-in-zone.
+* A first-time user can reach a successful connection without knowing a UUID.
+
+Priority 3 — Finish the instrument UI
+-------------------------------------
+
+Why: v1.5 creates the design language. v1.6 should make every state feel
+intentional, not just the happy path.
+
+Dashboard:
+
+* Keep the one-number hierarchy: hero BPM is the only large numeric reading.
+* Give the connection label, zone name, and session status a predictable
+  typographic hierarchy.
+* Preserve the 5/10/30-minute selector across refreshes and app launches.
+* Update persistent zone rows in place; they must never disappear on refresh.
+* Ensure all tappable/clickable controls are at least 36pt high or have an
+  equally large effective hit target.
+* Use a compact empty state for no strap/no samples and a richer error state
+  with a focused recovery action.
+
+Settings:
+
+* Add a compact live zone preview using the same token and zone logic as the
+  dashboard—not a separately styled mock.
+* Group labels and controls on a consistent alignment grid; avoid mixed manual
+  offsets where constraints can express the layout.
+* Make validation visible at the affected field and prevent Save until all
+  values are valid.
+* Keep the native colour well as the primary picker, with synchronized hex
+  field and an accessible colour name/value.
+* Add reset confirmation and unsaved-change handling only where they prevent
+  actual accidental loss; do not over-modalize routine adjustments.
+
+Visual acceptance package:
+
+* Capture approved light and dark screenshots for connected, disconnected,
+  recording, completed/export-ready, and export-error states.
+* Capture Settings at default and larger accessibility text sizes.
+* Keep those images in versioned test fixtures or release evidence, not only
+  in a chat or PR description.
+
+Priority 4 — Quality, architecture, and privacy
+------------------------------------------------
+
+1. Make UI code testable without pretending AppKit is fully unit-testable.
+
+   * Extract dashboard display-state and layout calculations from
+     `popover.py` into pure presentation modules.
+   * Replace repeated frame arithmetic with a small layout helper or Auto
+     Layout for sections that must adapt to text size.
+   * Keep AppKit views thin: apply a tested display model, wire actions, and
+     render a graph image.
+   * Write tests for graph range changes, zone-row updates, export-control
+     visibility, session history actions, and each connection state.
+
+2. Raise quality gates gradually.
+
+   * Raise branch coverage from 54% to 65% after P1/P2 work, then target 75%
+     only after meaningful state/session/BLE coverage—not by testing trivia.
+   * Fail CI on `git diff --check`, generated artifacts, and accidental secrets.
+   * Add a focused package smoke test to CI and archive its unsigned artifact
+     for inspection.
+   * Pin and periodically review build dependencies; let Dependabot PRs run
+     the full quality and bundle jobs.
+
+3. Add UI and accessibility verification.
+
+   * Test pure accessibility-label generation and keyboard routing.
+   * Establish a named manual macOS matrix for VoiceOver, focus order,
+     Increase Contrast, Reduce Motion, and Reduce Transparency.
+   * Add screenshot regression tests after the visual states are stable.
+
+4. Privacy-safe observability.
+
+   * Use structured event names for scan/connect/reconnect/export outcomes.
+   * Do not log BLE addresses, raw BPM streams, timestamps tied to readings,
+     notes, file paths, or session rows by default.
+   * Provide an explicit diagnostic mode that warns the user before collecting
+     additional local diagnostic detail and makes redaction rules clear.
+
+Priority 5 — Repository and GitHub polish
+-----------------------------------------
+
+This is deliberately “vanity with operational value”: it makes the project
+more legible to contributors and makes releases feel cared for.
+
+Labels (create once; use consistently)
+
+Type:
+  `type: bug`, `type: feature`, `type: docs`, `type: chore`, `type: security`
+
+Area:
+  `area: ui`, `area: bluetooth`, `area: sessions`, `area: export`,
+  `area: settings`, `area: build-release`, `area: tests`
+
+Priority:
+  `priority: p0`, `priority: p1`, `priority: p2`, `priority: p3`
+
+Workflow/status:
+  `status: needs-triage`, `status: needs-design`, `status: blocked`,
+  `status: ready`, `status: in-progress`, `status: needs-review`,
+  `status: deferred`, `status: duplicate`, `good first issue`,
+  `help wanted`
+
+Avoid labels that repeat the title or try to encode every possible state.
+Use a small documented palette and apply one type, one area, and one priority
+to each actionable issue.
+
+Milestones:
+
+* `v1.5.1 — Stabilization` — only regressions from the merged UI sprint and
+  release-documentation corrections; target before wider v1.6 work.
+* `v1.6 — Session Confidence` — durable history, export refinement,
+  connection clarity, visual/a11y acceptance; target only after a signed RC.
+* `v1.7 — Training Details` — evaluate pause/resume and a richer historical
+  detail view after v1.6 usage feedback.
+* `Backlog / needs discovery` — ideas that do not yet have acceptance criteria.
+
+Each milestone should have a short description, target window (not a promise),
+definition of done, and linked release issue. Close the milestone only after
+the GitHub release is published, not merely when code merges.
+
+Issue and PR flow:
+
+* Add an issue form for release blockers and a short “UX observation” form;
+  keep the existing bug/feature forms.
+* Use one issue per independently reviewable outcome. Include user story,
+  acceptance criteria, non-goals, privacy impact, and screenshots when UI is
+  involved.
+* Require PRs to link an issue or state why one is unnecessary.
+* Add a PR-size label (`size: XS/S/M/L`) and ask authors to split `L` PRs
+  before review when possible.
+* Require UI PRs to attach before/after screenshots plus the relevant manual
+  test matrix result.
+* Protect `main`: require quality and bundle checks, one approval, resolved
+  conversations, and branch up-to-date status. Prefer squash merges with a
+  conventional commit title.
+
+Automation:
+
+* Add release-please, Changesets, or a lightweight conventional-commit
+  workflow. Pick one; do not maintain multiple sources of truth.
+* Generate draft GitHub release notes from merged PR labels, then edit the
+  “Highlights”, “Fixes”, “Known limitations”, “Compatibility”, and checksum
+  sections by hand.
+* Add CODEOWNERS for UI, BLE/session, and build/release areas once there are
+  actual maintainers to assign.
+* Enable Dependabot grouping for development tools versus runtime/build tools.
+* Add a stale policy only after the issue backlog is large enough to need it;
+  never auto-close security reports or confirmed bugs.
+
+GitHub release format:
+
+  HRM Live v1.6.0
+
+  Highlights
+  - Durable local session history with Finder-aware exports.
+  - Clearer Bluetooth recovery and verified dashboard states.
+
+  Fixes
+  - Concise list of user-visible regressions fixed.
+
+  Compatibility
+  - macOS floor, supported Python/build environment, and supported strap scope.
+
+  Installation
+  - Signed DMG/ZIP link, SHA-256 checksum, and first-launch note.
+
+  Privacy and limitations
+  - Local-first data statement and fitness/not-medical disclaimer.
+
+  Known limitations
+  - Honest list of intentionally deferred behaviour.
+
+Suggested delivery sequence
+---------------------------
+
+Phase A — v1.5.1 stabilization (1–2 focused PRs)
+
+* Re-run manual UI/Bluetooth checks against the merged code.
+* Correct documentation/version inconsistencies.
+* Add the release evidence record and close any post-merge dashboard/export
+  regressions with tests.
+
+Phase B — v1.6 foundation (3–5 focused PRs)
+
+* Session-store schema, migration/recovery, and tests.
+* History card/detail/reveal/delete actions.
+* CSV/JSON export lifecycle and schema fixtures.
+* Connection-state model and deterministic BLE tests.
+
+Phase C — v1.6 polish and release candidate (2–4 focused PRs)
+
+* Settings preview and responsive layout pass.
+* Screenshot/a11y/manual test matrix and CI smoke coverage.
+* GitHub labels/milestone/release automation.
+* Signed/notarized RC, hardware matrix, release notes, and publication.
+
+Decision log to resolve before implementation
+---------------------------------------------
+
+1. Canonical storage location: keep the existing config location or migrate to
+   Application Support? Choose one, document it, and offer a safe migration.
+2. Raw sample retention: retain samples in local history by default, or retain
+   only summary until the user exports? Privacy and disk usage favour summary.
+3. “Delete” semantics: should exported files ever be trashed from the app?
+   Recommended default: no; make it an explicit secondary choice.
+4. Release versioning: use v1.5.1 for stabilization and v1.6.0 for product
+   features; never call an unnotarized development build a public release.
+5. Python distribution strategy: confirm whether Python 3.14 is intentionally
+   bundled/required for end users or merely the development/CI interpreter;
+   make README and release instructions match the answer.
+
+Definition of done for every v1.6 issue
+---------------------------------------
+
+* Acceptance criteria and non-goals are written before coding.
+* Focused automated tests cover business/state behaviour.
+* UI changes include before/after screenshots and named manual AppKit/a11y
+  checks where automation cannot cover the interaction.
+* Logs and errors contain no health readings, BLE identifiers, notes, or file
+  paths unless the user explicitly enabled diagnostics.
+* README, changelog, JSON schema/versioning, and release checklist are updated
+  when the user-visible behaviour or release scope changes.
+* CI quality and bundle jobs pass, and the PR has an honest risk/follow-up
+  section.
