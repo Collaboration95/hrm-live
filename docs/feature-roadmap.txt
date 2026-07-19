@@ -52,8 +52,8 @@ Priority 0 — Release confidence and regression closure
 Objective: make each release candidate reproducible, inspectable, and safe to
 hand to a real user.
 
-1. Create a release-candidate checklist that is tied to a commit SHA and
-   artifact checksum. It must record:
+1. Create release-candidate provenance tied to a commit SHA and artifact
+   checksum. It must record:
 
    * `make check`, clean `make package`, and `make verify-bundle` results.
    * macOS version, Xcode version, Python version, and exact commit.
@@ -65,8 +65,8 @@ hand to a real user.
 
 2. Replace stale documentation claims.
 
-   * Keep README, `pyproject.toml`, CI, and release checklist on one supported
-     Python version (currently 3.14).
+   * Keep README, `pyproject.toml`, and CI on one supported Python version
+     (currently 3.14).
    * Update README to describe JSON export, saved session history, and the
      actual dashboard controls.
    * Maintain a human-readable `CHANGELOG.md` under “Unreleased” while work is
@@ -267,39 +267,24 @@ more legible to contributors and makes releases feel cared for.
 
 Labels (create once; use consistently)
 
-Type:
-  `type: bug`, `type: feature`, `type: docs`, `type: chore`, `type: security`
+Core:
+  `bug`, `enhancement`, `documentation`, `dependencies`
 
-Area:
-  `area: ui`, `area: bluetooth`, `area: sessions`, `area: export`,
-  `area: settings`, `area: build-release`, `area: tests`
+Workflow:
+  `good first issue`, `help wanted`
 
-Priority:
-  `priority: p0`, `priority: p1`, `priority: p2`, `priority: p3`
-
-Workflow/status:
-  `status: needs-triage`, `status: needs-design`, `status: blocked`,
-  `status: ready`, `status: in-progress`, `status: needs-review`,
-  `status: deferred`, `status: duplicate`, `good first issue`,
-  `help wanted`
+PR size:
+  `size: xs`, `size: s`, `size: m`, `size: l`, `size: xl`
 
 Avoid labels that repeat the title or try to encode every possible state.
-Use a small documented palette and apply one type, one area, and one priority
-to each actionable issue.
+Use a small documented palette and apply one core label and one size label
+where they add value.
 
 Milestones:
 
-* `v1.5.1 — Stabilization` — only regressions from the merged UI sprint and
-  release-documentation corrections; target before wider v1.6 work.
 * `v1.6 — Session Confidence` — durable history, export refinement,
-  connection clarity, visual/a11y acceptance; target only after a signed RC.
-* `v1.7 — Training Details` — evaluate pause/resume and a richer historical
-  detail view after v1.6 usage feedback.
+  connection clarity, and visual/a11y acceptance.
 * `Backlog / needs discovery` — ideas that do not yet have acceptance criteria.
-
-Each milestone should have a short description, target window (not a promise),
-definition of done, and linked release issue. Close the milestone only after
-the GitHub release is published, not merely when code merges.
 
 Issue and PR flow:
 
@@ -309,8 +294,8 @@ Issue and PR flow:
   acceptance criteria, non-goals, privacy impact, and screenshots when UI is
   involved.
 * Require PRs to link an issue or state why one is unnecessary.
-* Add a PR-size label (`size: XS/S/M/L`) and ask authors to split `L` PRs
-  before review when possible.
+* Add a PR-size label (`size: xs/s/m/l/xl`) and ask authors to split `L`
+  PRs before review when possible.
 * Require UI PRs to attach before/after screenshots plus the relevant manual
   test matrix result.
 * Protect `main`: require quality and bundle checks, one approval, resolved
@@ -324,11 +309,7 @@ Automation:
 * Generate draft GitHub release notes from merged PR labels, then edit the
   “Highlights”, “Fixes”, “Known limitations”, “Compatibility”, and checksum
   sections by hand.
-* Add CODEOWNERS for UI, BLE/session, and build/release areas once there are
-  actual maintainers to assign.
 * Enable Dependabot grouping for development tools versus runtime/build tools.
-* Add a stale policy only after the issue backlog is large enough to need it;
-  never auto-close security reports or confirmed bugs.
 
 GitHub release format:
 
@@ -401,7 +382,7 @@ Definition of done for every v1.6 issue
   checks where automation cannot cover the interaction.
 * Logs and errors contain no health readings, BLE identifiers, notes, or file
   paths unless the user explicitly enabled diagnostics.
-* README, changelog, JSON schema/versioning, and release checklist are updated
+* README, changelog, JSON schema/versioning, and release notes are updated
   when the user-visible behaviour or release scope changes.
 * CI quality and bundle jobs pass, and the PR has an honest risk/follow-up
   section.

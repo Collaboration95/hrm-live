@@ -11,7 +11,8 @@ with a zone gauge, HR graph, and session recording.
   graph, session stats, and start/stop controls
 - **BLE HRM support** for standard GATT Heart Rate Measurement (0x2A37)
 - **4-zone model** with configurable boundaries and colors
-- **Session recording** with user-selected CSV export
+- **Session recording** with user-selected CSV and JSON export
+- **Saved session history** for reopening recent sessions and exported files
 - **Configurable settings** (max HR, zone boundaries, colors, graph window)
 
 ## Requirements
@@ -126,20 +127,39 @@ Default settings:
 
 ## Session Data
 
-Stopping a non-empty session opens a Finder save dialog. No CSV is written
-until you choose a destination. Cancelling keeps the completed session in
-memory and exposes `Save Last Session...` until a new session starts.
+Stopping a non-empty session opens a Finder save dialog. No CSV or JSON is
+written until you choose a destination. Cancelling keeps the completed session
+in local history and exposes `Save Last Session...` until a new session starts.
+
+Completed sessions stay available in the recent-session history, so you can
+reopen a prior summary, reveal an existing export in Finder, and retry a
+failed save without re-recording the workout.
 
 Session duration is based on timestamp deltas between valid heart-rate
 samples, assigned to the previous sample's zone. A single notification gap is
 clamped to 5 seconds so disconnects or sleep do not create inflated workout
 durations. The first sample adds zero seconds.
 
+JSON export includes the zone-transition count plus app and export schema
+versions alongside the recorded samples.
+
 Format:
 ```csv
 timestamp,bpm,zone
 2025-08-10T07:34:12,142,Z3
 ```
+
+## GitHub Workflow
+
+The repository uses GitHub-native labels and a small milestone set.
+
+- Issue labels: `bug`, `enhancement`, `documentation`, `dependencies`,
+  `good first issue`, `help wanted`
+- PR size labels: `size: xs`, `size: s`, `size: m`, `size: l`, `size: xl`
+- Milestone: `v1.6 — Session Confidence`
+
+Pull requests should link the tracking issue and include screenshots for UI
+changes.
 
 ## Project Structure
 

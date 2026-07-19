@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a required PR issue-link section and screenshot guidance for UI changes.
+- Document the GitHub label palette, including PR size labels and the v1.6 milestone.
+- Update the README to cover JSON export and saved session history.
+- Trim roadmap/admin references that no longer belong in the feature roadmap.
+
 ## 0.1.0 - 2026-07-15
 
 - Move runtime code into the `src/hrm_live` package layout.

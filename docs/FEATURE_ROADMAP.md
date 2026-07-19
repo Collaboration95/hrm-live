@@ -225,7 +225,7 @@ a typical workout without manually managing files mid-flow.
 
 | Priority | Work item | Why now | Dependencies |
 | --- | --- | --- | --- |
-| P0 | Repeatable package verification and release checklist | A feature release cannot be trusted on a non-repeatable build. | Apple distribution work |
+| P0 | Repeatable package verification | A feature release cannot be trusted on a non-repeatable build. | Apple distribution work |
 | P0 | Restore versioned `docs/` and add this roadmap | Decisions and release evidence must survive branches. | None |
 | P1 | Design tokens, menu-bar contrast, one BPM hierarchy | Fixes the most visible trust/legibility problems in the supplied screens. | Screenshot review |
 | P1 | Dashboard layout and action hierarchy | Establishes the product's daily-use experience. | Design tokens |
