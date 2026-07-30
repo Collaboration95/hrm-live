@@ -90,13 +90,16 @@ class SettingsWindow:
     def show(self) -> None:
         """Open the settings window."""
         if self._panel and self._panel.isVisible():
+            NSApp.activateIgnoringOtherApps_(True)
             self._panel.orderFront_(None)
             return
 
         self._build_panel()
         self.refresh_from_state(force=True)
         assert self._panel is not None
+        NSApp.activateIgnoringOtherApps_(True)
         self._panel.makeKeyAndOrderFront_(None)
+        self._panel.orderFrontRegardless()
 
     def close(self) -> None:
         """Close the settings window."""

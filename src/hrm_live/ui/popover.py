@@ -54,9 +54,7 @@ from hrm_live.ui.tokens import (
     CARD_PADDING,
     DIVIDER,
     GAUGE_LINE_WIDTH,
-    GAUGE_SIZE,
     GRAPH_HEIGHT,
-    HERO_BPM,
     INLINE_GAP,
     LABEL,
     OUTER_PADDING,
@@ -77,9 +75,8 @@ from hrm_live.zones import ZONE_ORDER, get_zone, zone_label
 log = logging.getLogger(__name__)
 
 POPOVER_WIDTH = 344
-GAUGE_LABEL_FONT_SIZE = 12
-HERO_FONT_SIZE = 48
 RECENT_SESSION_ROWS = 4
+HERO_GAUGE_SIZE = 164
 # Keep the popover vertically anchored to the status-item button.  Passing
 # ``0`` here means ``NSRectEdgeMinX`` and places the popover to the left.
 POPOVER_PREFERRED_EDGE = NSRectEdgeMinY
@@ -226,12 +223,12 @@ class HRMPopover:
         # Keep this in sync with the fixed-frame sections below.  The old
         # estimate was too short, which clipped controls at the bottom.
         header_h = 36 + SECTION_GAP
-        hero_h = HERO_BPM + 8 + GAUGE_SIZE + CARD_PADDING * 2 + INLINE_GAP + SECTION_GAP_LARGE
+        hero_h = HERO_GAUGE_SIZE + 26 + CARD_PADDING * 2 + INLINE_GAP + SECTION_GAP_LARGE
         trend_h = 24 + INLINE_GAP + 34 + INLINE_GAP + GRAPH_HEIGHT + CARD_PADDING * 2
         trend_h += INLINE_GAP + SECTION_GAP_LARGE
         session_h = 24 + INLINE_GAP + 42 + INLINE_GAP + 96 + CARD_PADDING * 2
         session_h += INLINE_GAP + SECTION_GAP
-        action_h = 12 + 40 + INLINE_GAP + 64 + 8 + SECTION_GAP
+        action_h = 12 + 40 + INLINE_GAP + 36 + SECTION_GAP
         recent_h = 24 + INLINE_GAP + 22 + CARD_PADDING * 2
         return (
             OUTER_PADDING
@@ -389,10 +386,11 @@ class HRMPopover:
         zone_bounds: dict,
         max_hr: int,
     ) -> float:
-        """Build the hero card: large BPM + gaug + zone label."""
+        """Build the hero card: one centered heart-rate gauge and zone label."""
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
-        card_h = HERO_BPM + 8 + GAUGE_SIZE + CARD_PADDING * 2
+        zone_label_h = 22
+        card_h = HERO_GAUGE_SIZE + zone_label_h + CARD_PADDING * 2 + 4
 
         # Card background
         card = ColoredRectView.alloc().initWithFrame_(((x, y - card_h), (card_w, card_h)))
@@ -400,31 +398,22 @@ class HRMPopover:
         card.setCornerRadius_(8)
         root.addSubview_(card)
 
-        cy = y - CARD_PADDING
-
-        # Hero BPM
         bpm_val = s.latest_bpm if s.connected and s.latest_bpm is not None else None
-        bpm_str = f"{bpm_val}" if bpm_val is not None else "---"
         accent = zone_accent(zone, colors_cfg) if bpm_val is not None else TEXT_TERTIARY
-        hero = _make_label(
-            bpm_str,
-            NSFont.monospacedDigitSystemFontOfSize_weight_(HERO_BPM, 0),
-            _ns_color(accent),
-            (x + CARD_PADDING, cy - HERO_BPM, 180, HERO_BPM),
-        )
-        root.addSubview_(hero)
-        self._hero_label = hero
 
-        # BPM unit label next to hero
-        unit = _make_label(
-            "BPM",
-            NSFont.systemFontOfSize_(LABEL),
-            _ns_color(TEXT_TERTIARY),
-            (x + CARD_PADDING + 140, cy - HERO_BPM + 8, 50, 20),
+        # The gauge is the single centered live-heart-rate reading.
+        gauge_x = x + (card_w - HERO_GAUGE_SIZE) / 2
+        gauge_y = y - CARD_PADDING - HERO_GAUGE_SIZE
+        gauge_frame = ((gauge_x, gauge_y), (HERO_GAUGE_SIZE, HERO_GAUGE_SIZE))
+        gauge_view = DonutGaugeView.alloc().initWithFrame_(gauge_frame)
+        gauge_view.setBpm_zone_zoneBounds_maxHr_colorsCfg_(
+            bpm_val, zone, zone_bounds, max_hr, colors_cfg
         )
-        root.addSubview_(unit)
+        root.addSubview_(gauge_view)
+        self._gauge_view = gauge_view
 
-        # Zone name
+        # Zone sits directly below the gauge, rather than duplicating it in
+        # the dial itself.
         if bpm_val is not None:
             zl = zone_label(zone)
             zone_str = f"{zone} — {zl}"
@@ -434,21 +423,12 @@ class HRMPopover:
             zone_str,
             NSFont.systemFontOfSize_(LABEL),
             _ns_color(accent if bpm_val is not None else TEXT_TERTIARY),
-            (x + CARD_PADDING, cy - HERO_BPM - 20, 200, 20),
+            (x + CARD_PADDING, gauge_y - zone_label_h, card_w - 2 * CARD_PADDING, zone_label_h),
         )
+        zlbl.setAlignment_(2)  # NSTextAlignmentCenter
         root.addSubview_(zlbl)
         self._zone_label = zlbl
-
-        # Donut gauge (right side, no centre number)
-        gauge_x = POPOVER_WIDTH - OUTER_PADDING - CARD_PADDING - GAUGE_SIZE
-        gauge_y = cy - GAUGE_SIZE - CARD_PADDING
-        gauge_frame = ((gauge_x, gauge_y), (GAUGE_SIZE, GAUGE_SIZE))
-        gauge_view = DonutGaugeView.alloc().initWithFrame_(gauge_frame)
-        gauge_view.setBpm_zone_zoneBounds_maxHr_colorsCfg_(
-            bpm_val, zone, zone_bounds, max_hr, colors_cfg
-        )
-        root.addSubview_(gauge_view)
-        self._gauge_view = gauge_view
+        self._hero_label = None
 
         return y - card_h - INLINE_GAP
 
@@ -741,7 +721,7 @@ class HRMPopover:
         y -= 12
 
         # Primary session action is visually distinct from export options.
-        btn_title = "■ Stop & Save" if s.session_active else "▶ Start Session"
+        btn_title = "■ Stop & Save" if s.session_active else "▶ Start Recording"
         primary_btn = _make_dashboard_button(((x, y - 40), (card_w, 40)), btn_title, "primary")
         primary_btn.setTarget_(self)
         primary_btn.setAction_("start_session:" if not s.session_active else "stop_session:")
@@ -749,7 +729,7 @@ class HRMPopover:
         self._session_button = primary_btn
         y -= 48
 
-        export_container_h = 64
+        export_container_h = 36
         export_container = NSView.alloc().initWithFrame_(
             ((x, y - export_container_h), (card_w, export_container_h))
         )
@@ -757,12 +737,12 @@ class HRMPopover:
         self._export_controls_container = export_container
         self._rebuild_export_controls(s)
 
-        return y - export_container_h - 8
+        return y - export_container_h
 
     def _update_actions(self, s: UISnapshot) -> None:
         """Update action button titles and visibility."""
         if self._session_button:
-            title = "■ Stop & Save" if s.session_active else "▶ Start Session"
+            title = "■ Stop & Save" if s.session_active else "▶ Start Recording"
             self._session_button.setTitle_(title)
             _set_dashboard_button_style(self._session_button, "primary")
             action = "stop_session:" if s.session_active else "start_session:"
@@ -779,13 +759,13 @@ class HRMPopover:
 
         show_retry, export_message, export_is_error = _export_feedback(s)
         if show_retry:
-            save_btn = _make_dashboard_button(((0, 28), (140, 36)), "Save CSV", "secondary")
+            save_btn = _make_dashboard_button(((0, 0), (140, 36)), "Save CSV", "secondary")
             save_btn.setTarget_(self)
             save_btn.setAction_("save_last_session:")
             container.addSubview_(save_btn)
             self._save_button = save_btn
 
-            json_btn = _make_dashboard_button(((148, 28), (140, 36)), "Save JSON", "secondary")
+            json_btn = _make_dashboard_button(((148, 0), (140, 36)), "Save JSON", "secondary")
             json_btn.setTarget_(self)
             json_btn.setAction_("save_last_session_json:")
             container.addSubview_(json_btn)
@@ -970,6 +950,8 @@ class HRMPopover:
     def open_settings_(self, sender: Any) -> None:
         """Open the settings window."""
         try:
+            if self._popover:
+                self._popover.performClose_(sender)
             if self.on_settings:
                 self.on_settings()
         except Exception:
@@ -1047,11 +1029,7 @@ class HRMPopover:
 
 
 class DonutGaugeView(NSView):
-    """An NSView subclass that draws a donut/arc gauge showing HR zone.
-
-    No centre BPM number — the hero label is the sole numeric reading.
-    Shows zone ticks and coloured arc only.
-    """
+    """An NSView subclass that draws the centered live heart-rate gauge."""
 
     def initWithFrame_(self, frame: tuple) -> DonutGaugeView:
         self = objc.super(DonutGaugeView, self).initWithFrame_(frame)
@@ -1095,10 +1073,7 @@ class DonutGaugeView(NSView):
             ctx.restoreGraphicsState()
 
     def _draw_gauge(self) -> None:
-        """Render the gauge: background ring, active arc, zone ticks.
-
-        No centre BPM number — that belongs in the hero label.
-        """
+        """Render the gauge ring, active arc, zone ticks, and live BPM."""
         import math as m
 
         bounds = self.bounds()
@@ -1150,10 +1125,10 @@ class DonutGaugeView(NSView):
                     _ns_color("#666666").setStroke()
                     tick_path.stroke()
 
-            # Zone label at bottom of gauge
-            label = zone_label(self._zone)
-            font = NSFont.systemFontOfSize_(GAUGE_LABEL_FONT_SIZE)
-            col = _ns_color(zone_accent(self._zone, self._colors_cfg))
+            # One legible numeric reading lives inside the dial.
+            label = str(self._bpm)
+            font = NSFont.monospacedDigitSystemFontOfSize_weight_(38, 0.2)
+            col = _ns_color(TEXT_PRIMARY)
             attrs = {
                 NSFontAttributeName: font,
                 NSForegroundColorAttributeName: col,
@@ -1161,10 +1136,8 @@ class DonutGaugeView(NSView):
             ns_str = NSString.alloc().initWithString_(label)
             size = ns_str.sizeWithAttributes_(attrs)
             x = cx - size.width / 2
-            y = cy - size.height / 2 - radius + GAUGE_LINE_WIDTH + 8
+            y = cy - size.height / 2
             ns_str.drawAtPoint_withAttributes_((x, y), attrs)
-
-        # No centre BPM number — hero label is the sole numeric reading.
 
 
 class ColoredRectView(NSView):

@@ -104,6 +104,27 @@ def test_popover_exposes_native_dashboard_controller() -> None:
     assert _make_dashboard_button is not None
 
 
+def test_settings_action_closes_popover_then_opens_settings() -> None:
+    """The transient dashboard must not keep the Settings panel hidden."""
+    from hrm_live.state import AppState
+    from hrm_live.ui.popover import HRMPopover
+
+    events: list[tuple[str, object]] = []
+
+    class FakePopover:
+        def performClose_(self, sender: object) -> None:
+            events.append(("close", sender))
+
+    popover = HRMPopover(AppState())
+    popover._popover = FakePopover()  # type: ignore[assignment]
+    popover.on_settings = lambda: events.append(("settings", None))
+    sender = object()
+
+    popover.open_settings_(sender)
+
+    assert events == [("close", sender), ("settings", None)]
+
+
 def test_popover_duration_formats_clamped_zone_seconds() -> None:
     """Dashboard duration uses accumulated zone seconds, not wall time."""
     from hrm_live.ui.popover import _format_td_seconds
