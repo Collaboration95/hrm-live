@@ -71,6 +71,7 @@ def test_import_popover() -> None:
     import hrm_live.ui.popover as popover
 
     assert popover.POPOVER_WIDTH > 0
+    assert popover.POPOVER_PREFERRED_EDGE == 1  # NSRectEdgeMinY: directly below the widget
 
 
 def test_dark_button_title_helper_leaves_native_contrast_to_appkit() -> None:

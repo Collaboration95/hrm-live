@@ -36,6 +36,7 @@ from AppKit import (
     NSModalResponseOK,
     NSPopover,
     NSPopoverBehaviorTransient,
+    NSRectEdgeMinY,
     NSSavePanel,
     NSTextField,
     NSView,
@@ -79,6 +80,9 @@ POPOVER_WIDTH = 344
 GAUGE_LABEL_FONT_SIZE = 12
 HERO_FONT_SIZE = 48
 RECENT_SESSION_ROWS = 4
+# Keep the popover vertically anchored to the status-item button.  Passing
+# ``0`` here means ``NSRectEdgeMinX`` and places the popover to the left.
+POPOVER_PREFERRED_EDGE = NSRectEdgeMinY
 
 
 class HRMPopover:
@@ -151,7 +155,7 @@ class HRMPopover:
         self._popover.showRelativeToRect_ofView_preferredEdge_(
             sender.bounds(),
             sender,
-            0,  # NSRectEdgeMinY
+            POPOVER_PREFERRED_EDGE,
         )
 
     def refresh(self) -> None:
