@@ -22,7 +22,6 @@ from typing import Any
 
 import objc
 from AppKit import (
-    NSAttributedString,
     NSBezelStyleRounded,
     NSBezierPath,
     NSButton,
@@ -37,8 +36,6 @@ from AppKit import (
     NSPopover,
     NSPopoverBehaviorTransient,
     NSSavePanel,
-    NSSegmentedControl,
-    NSSegmentSwitchTrackingSelectOne,
     NSTextField,
     NSView,
     NSViewController,
@@ -63,7 +60,6 @@ from hrm_live.ui.tokens import (
     OUTER_PADDING,
     SECTION_GAP,
     SECTION_GAP_LARGE,
-    SECTION_VALUE,
     STATUS_CONNECTED,
     STATUS_DISCONNECTED,
     STATUS_ERROR,
@@ -110,7 +106,7 @@ class HRMPopover:
         self._gauge_view: DonutGaugeView | None = None
         self._graph_image_view: NSImageView | None = None
         self._graph_placeholder: NSTextField | None = None
-        self._trend_selector: NSSegmentedControl | None = None
+        self._trend_buttons: list[DashboardButton] = []
         self._session_stats_label: NSTextField | None = None
         self._zone_bar_container: NSView | None = None
         self._session_button: NSButton | None = None
@@ -205,8 +201,9 @@ class HRMPopover:
 
         # ── Trend card: graph ───────────────────────────────────────
         self._update_graph(s, max_hr, zones_cfg, colors_cfg)
-        if self._trend_selector:
-            self._trend_selector.setSelectedSegment_(self._trend_segment_for_minutes(s.config))
+        selected_segment = self._trend_segment_for_minutes(s.config)
+        for idx, button in enumerate(self._trend_buttons):
+            button.setVisualStyle_("selected" if idx == selected_segment else "secondary")
 
         # ── Session card ────────────────────────────────────────────
         self._update_session(s, colors_cfg)
@@ -219,17 +216,26 @@ class HRMPopover:
 
     def _calculate_height(self) -> float:
         """Estimate the total popover height based on content sections."""
-        # Header: ~24pt
-        h = OUTER_PADDING + 24 + INLINE_GAP
-        # Hero card: gauge (110) + label space
-        h += HERO_BPM + 8 + GAUGE_SIZE + SECTION_GAP
-        # Trend card: graph + selector
-        h += GRAPH_HEIGHT + 30 + SECTION_GAP
-        # Session card: stats + zone bars
-        h += 60 + 100 + SECTION_GAP
-        # Action area + recent sessions archive
-        h += 80 + 128 + SECTION_GAP
-        return max(h, 520)
+        # Keep this in sync with the fixed-frame sections below.  The old
+        # estimate was too short, which clipped controls at the bottom.
+        header_h = 36 + SECTION_GAP
+        hero_h = HERO_BPM + 8 + GAUGE_SIZE + CARD_PADDING * 2 + INLINE_GAP + SECTION_GAP_LARGE
+        trend_h = 24 + INLINE_GAP + 34 + INLINE_GAP + GRAPH_HEIGHT + CARD_PADDING * 2
+        trend_h += INLINE_GAP + SECTION_GAP_LARGE
+        session_h = 24 + INLINE_GAP + 42 + INLINE_GAP + 96 + CARD_PADDING * 2
+        session_h += INLINE_GAP + SECTION_GAP
+        action_h = 12 + 40 + INLINE_GAP + 64 + 8 + SECTION_GAP
+        recent_h = 24 + INLINE_GAP + 22 + CARD_PADDING * 2
+        return (
+            OUTER_PADDING
+            + header_h
+            + hero_h
+            + trend_h
+            + session_h
+            + action_h
+            + recent_h
+            + OUTER_PADDING
+        )
 
     def _build_view(self) -> NSView:
         """Build the persistent view hierarchy (called once)."""
@@ -324,15 +330,15 @@ class HRMPopover:
         root.addSubview_(dev_label)
         self._header_device_label = dev_label
 
-        # Gear / settings button
-        gear_btn = NSButton.alloc().initWithFrame_(
-            ((POPOVER_WIDTH - OUTER_PADDING - 32, y - 28), (28, 28))
+        # A labelled control is easier to discover than the old icon-only
+        # 28 pt gear against a dark dashboard surface.
+        gear_btn = _make_dashboard_button(
+            ((POPOVER_WIDTH - OUTER_PADDING - 96, y - 32), (96, 32)),
+            "⚙  Settings",
+            "secondary",
         )
-        gear_btn.setBezelStyle_(NSBezelStyleRounded)
-        gear_btn.setTitle_("⚙")
         gear_btn.setTarget_(self)
         gear_btn.setAction_("open_settings:")
-        _set_dark_button_title(gear_btn, "Settings")
         root.addSubview_(gear_btn)
 
         return y - 36
@@ -454,7 +460,7 @@ class HRMPopover:
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
         header_h = 24
-        selector_h = 22
+        selector_h = 34
         gap = INLINE_GAP
         card_h = header_h + gap + selector_h + gap + GRAPH_HEIGHT + CARD_PADDING * 2
 
@@ -476,20 +482,25 @@ class HRMPopover:
 
         cy -= header_h + gap
 
-        # Range selector (5 / 10 / 30 min)
-        selector = NSSegmentedControl.alloc().initWithFrame_(
-            ((x + CARD_PADDING, cy - selector_h), (200, selector_h))
-        )
-        selector.setSegmentCount_(3)
-        selector.setLabel_forSegment_("5 min", 0)
-        selector.setLabel_forSegment_("10 min", 1)
-        selector.setLabel_forSegment_("30 min", 2)
-        selector.setTrackingMode_(NSSegmentSwitchTrackingSelectOne)
-        selector.setTarget_(self)
-        selector.setAction_("trend_range_changed:")
-        selector.setSelectedSegment_(self._trend_segment_for_minutes(s.config))
-        root.addSubview_(selector)
-        self._trend_selector = selector
+        # Explicit buttons retain their contrast on the dark surface; native
+        # segmented controls were rendering as unreadable black capsules.
+        selected = self._trend_segment_for_minutes(s.config)
+        selector_w = (card_w - 2 * CARD_PADDING - 2 * INLINE_GAP) / 3
+        self._trend_buttons = []
+        for idx, title in enumerate(("5 min", "10 min", "30 min")):
+            button = _make_dashboard_button(
+                (
+                    (x + CARD_PADDING + idx * (selector_w + INLINE_GAP), cy - selector_h),
+                    (selector_w, selector_h),
+                ),
+                title,
+                "selected" if idx == selected else "secondary",
+            )
+            button.setTag_(idx)
+            button.setTarget_(self)
+            button.setAction_("trend_range_changed:")
+            root.addSubview_(button)
+            self._trend_buttons.append(button)
 
         graph_y = cy - selector_h - gap - GRAPH_HEIGHT
 
@@ -529,7 +540,7 @@ class HRMPopover:
     def trend_range_changed_(self, sender: Any) -> None:
         """Handle graph time range selection."""
         segments = {0: 5, 1: 10, 2: 30}
-        minutes = segments.get(sender.selectedSegment(), 10)
+        minutes = segments.get(sender.tag(), 10)
         cfg = deepcopy(self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG)
         if cfg.get("graph_window_minutes") != minutes:
             cfg["graph_window_minutes"] = minutes
@@ -600,8 +611,8 @@ class HRMPopover:
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
         header_h = 24
-        stats_h = 20
-        bar_area_h = 80
+        stats_h = 42
+        bar_area_h = 96
         card_h = header_h + INLINE_GAP + stats_h + INLINE_GAP + bar_area_h + CARD_PADDING * 2
 
         card = ColoredRectView.alloc().initWithFrame_(((x, y - card_h), (card_w, card_h)))
@@ -622,8 +633,9 @@ class HRMPopover:
 
         cy -= header_h + INLINE_GAP
 
-        # Stats line: elapsed | avg | max
-        stats_font = NSFont.monospacedDigitSystemFontOfSize_weight_(SECTION_VALUE, 0)
+        # Two short stat lines are readable at a glance.  The previous single
+        # 18 pt line overflowed the card once all four values were populated.
+        stats_font = NSFont.monospacedDigitSystemFontOfSize_weight_(14, 0)
         stats_str = self._session_stats_string(s)
         stats_lbl = _make_label(
             stats_str,
@@ -659,7 +671,7 @@ class HRMPopover:
         avg = s.session_sum / s.session_count if s.session_count > 0 else 0
         mx = s.session_max if s.session_count > 0 else 0
         mn = s.session_min if s.session_count > 0 and s.session_min < 999 else 0
-        return f"{elapsed}  |  Avg {avg:.0f}  |  Max {mx}  |  Min {mn}"
+        return f"Elapsed {elapsed}   Avg {avg:.0f} bpm\nMax {mx} bpm      Min {mn} bpm"
 
     def _rebuild_zone_bars(self, s: UISnapshot, colors_cfg: dict) -> None:
         container = self._zone_bar_container
@@ -671,24 +683,36 @@ class HRMPopover:
 
         bar_area_w = container.frame().size.width
         total = sum(s.zone_times.values()) or 1
-        row_height = 18
+        row_height = 24
         for idx, zone in enumerate(ZONE_ORDER):
             row_y = idx * row_height
             seconds = s.zone_times.get(zone, 0)
-            bar_str = f"{zone}  {_format_td_short(seconds)}"
-            lbl = _make_label(
-                bar_str,
-                NSFont.systemFontOfSize_(10),
-                _ns_color(TEXT_SECONDARY),
-                (0, row_y, 80, 16),
+            zone_label_view = _make_label(
+                zone,
+                NSFont.monospacedDigitSystemFontOfSize_weight_(12, 0.4),
+                _ns_color(zone_accent(zone, colors_cfg)),
+                (0, row_y + 3, 28, 18),
             )
-            container.addSubview_(lbl)
+            container.addSubview_(zone_label_view)
+            time_label = _make_label(
+                _format_td_short(seconds),
+                NSFont.monospacedDigitSystemFontOfSize_weight_(12, 0),
+                _ns_color(TEXT_PRIMARY),
+                (bar_area_w - 64, row_y + 3, 64, 18),
+            )
+            container.addSubview_(time_label)
 
+            bar_x = 34
+            bar_max_w = bar_area_w - bar_x - 72
+            track = ColoredRectView.alloc().initWithFrame_(((bar_x, row_y + 5), (bar_max_w, 14)))
+            track.setColor_(_ns_color("#343434"))
+            track.setCornerRadius_(7)
+            container.addSubview_(track)
             frac = seconds / total
-            bar_w = max(int(frac * (bar_area_w - 90)), 4)
-            bar = ColoredRectView.alloc().initWithFrame_(((85, row_y + 2), (bar_w, 12)))
+            bar_w = max(int(frac * bar_max_w), 4)
+            bar = ColoredRectView.alloc().initWithFrame_(((bar_x, row_y + 5), (bar_w, 14)))
             bar.setColor_(_ns_color(zone_accent(zone, colors_cfg)))
-            bar.setCornerRadius_(2)
+            bar.setCornerRadius_(7)
             container.addSubview_(bar)
 
     # ── Action Area ─────────────────────────────────────────────────────
@@ -709,18 +733,16 @@ class HRMPopover:
         root.addSubview_(sep)
         y -= 12
 
-        # Primary session button (full width)
+        # Primary session action is visually distinct from export options.
         btn_title = "■ Stop & Save" if s.session_active else "▶ Start Session"
-        primary_btn = NSButton.alloc().initWithFrame_(((x, y - 36), (card_w, 36)))
-        primary_btn.setBezelStyle_(NSBezelStyleRounded)
+        primary_btn = _make_dashboard_button(((x, y - 40), (card_w, 40)), btn_title, "primary")
         primary_btn.setTarget_(self)
         primary_btn.setAction_("start_session:" if not s.session_active else "stop_session:")
-        _set_dark_button_title(primary_btn, btn_title)
         root.addSubview_(primary_btn)
         self._session_button = primary_btn
-        y -= 42
+        y -= 48
 
-        export_container_h = 56
+        export_container_h = 64
         export_container = NSView.alloc().initWithFrame_(
             ((x, y - export_container_h), (card_w, export_container_h))
         )
@@ -735,6 +757,7 @@ class HRMPopover:
         if self._session_button:
             title = "■ Stop & Save" if s.session_active else "▶ Start Session"
             self._session_button.setTitle_(title)
+            self._session_button.setVisualStyle_("primary")
             action = "stop_session:" if s.session_active else "start_session:"
             self._session_button.setAction_(action)
         self._rebuild_export_controls(s)
@@ -749,19 +772,15 @@ class HRMPopover:
 
         show_retry, export_message, export_is_error = _export_feedback(s)
         if show_retry:
-            save_btn = NSButton.alloc().initWithFrame_(((0, 24), (140, 30)))
-            save_btn.setBezelStyle_(NSBezelStyleRounded)
+            save_btn = _make_dashboard_button(((0, 28), (140, 36)), "Save CSV", "secondary")
             save_btn.setTarget_(self)
             save_btn.setAction_("save_last_session:")
-            _set_dark_button_title(save_btn, "💾 Save CSV")
             container.addSubview_(save_btn)
             self._save_button = save_btn
 
-            json_btn = NSButton.alloc().initWithFrame_(((148, 24), (140, 30)))
-            json_btn.setBezelStyle_(NSBezelStyleRounded)
+            json_btn = _make_dashboard_button(((148, 28), (140, 36)), "Save JSON", "secondary")
             json_btn.setTarget_(self)
             json_btn.setAction_("save_last_session_json:")
-            _set_dark_button_title(json_btn, "📊 Save JSON")
             container.addSubview_(json_btn)
             self._json_save_button = json_btn
             self._controls["json_save_button"] = json_btn
@@ -1173,6 +1192,54 @@ class ColoredRectView(NSView):
             log.exception("Failed to draw colored view")
 
 
+class DashboardButton(NSButton):
+    """A high-contrast dashboard button independent of app appearance."""
+
+    _STYLE_COLORS = {
+        "primary": ("#0A84FF", "#FFFFFF", "#0A84FF"),
+        "selected": ("#245A8D", "#FFFFFF", "#58B8FF"),
+        "secondary": ("#343434", "#FFFFFF", "#5A5A5A"),
+    }
+
+    def initWithFrame_style_(self, frame: tuple, style: str) -> DashboardButton:
+        self = objc.super(DashboardButton, self).initWithFrame_(frame)
+        if self:
+            self._visual_style = style
+            self.setBordered_(False)
+        return self
+
+    def setVisualStyle_(self, style: str) -> None:
+        self._visual_style = style
+        self.setNeedsDisplay_(True)
+
+    def drawRect_(self, rect: tuple) -> None:
+        fill_hex, text_hex, border_hex = self._STYLE_COLORS.get(
+            self._visual_style, self._STYLE_COLORS["secondary"]
+        )
+        bounds = self.bounds()
+        radius = min(7, bounds.size.height / 2)
+        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(bounds, radius, radius)
+        _ns_color(fill_hex).setFill()
+        path.fill()
+        path.setLineWidth_(1)
+        _ns_color(border_hex).setStroke()
+        path.stroke()
+
+        attrs = {
+            NSFontAttributeName: NSFont.systemFontOfSize_weight_(13, 0.3),
+            NSForegroundColorAttributeName: _ns_color(text_hex),
+        }
+        title = NSString.alloc().initWithString_(self.title())
+        text_size = title.sizeWithAttributes_(attrs)
+        title.drawAtPoint_withAttributes_(
+            (
+                (bounds.size.width - text_size.width) / 2,
+                (bounds.size.height - text_size.height) / 2,
+            ),
+            attrs,
+        )
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -1213,6 +1280,14 @@ def _make_label(text: str, font: NSFont, color: NSColor, frame: tuple) -> NSText
     return f
 
 
+def _make_dashboard_button(frame: tuple, title: str, style: str) -> DashboardButton:
+    """Create a dashboard button with guaranteed contrast and a clear role."""
+    button = DashboardButton.alloc().initWithFrame_style_(_rect(frame), style)
+    button.setTitle_(title)
+    button.setAccessibilityLabel_(title)
+    return button
+
+
 def _rect(frame: tuple) -> tuple:
     """Accept flat or AppKit-style rect tuples and return AppKit form."""
     if len(frame) == 2:
@@ -1236,14 +1311,8 @@ def _ns_color(hex_str: str) -> NSColor:
 
 
 def _set_dark_button_title(button: NSButton, title: str) -> None:
-    """Style a button with white text on dark background."""
-    attrs = {
-        NSForegroundColorAttributeName: NSColor.labelColor(),
-        NSFontAttributeName: NSFont.systemFontOfSize_(13),
-    }
-    attributed = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
+    """Set a native button title without overriding its contrast handling."""
     button.setTitle_(title)
-    button.setAttributedTitle_(attributed)
     button.setAccessibilityLabel_(title)
 
 

@@ -13,11 +13,11 @@ import threading
 import objc
 import rumps
 from AppKit import (
-    NSAttributedString,
     NSColor,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSMutableAttributedString,
 )
 from Foundation import NSObject
 
@@ -183,7 +183,12 @@ class HRMBarApp(rumps.App):
                 NSFontAttributeName: NSFont.menuBarFontOfSize_(0),
             }
 
-            attributed = NSAttributedString.alloc().initWithString_attributes_(full, text_attrs)
+            # ``NSAttributedString`` is immutable.  This title needs a
+            # differently coloured trailing status dot, so use its mutable
+            # counterpart before assigning it to the status-bar button.
+            attributed = NSMutableAttributedString.alloc().initWithString_attributes_(
+                full, text_attrs
+            )
             # Apply dot colour to the last character (the dot)
             dot_range = (len(full) - 1, 1)
             attributed.addAttributes_range_(dot_attrs, dot_range)

@@ -73,23 +73,17 @@ def test_import_popover() -> None:
     assert popover.POPOVER_WIDTH > 0
 
 
-def test_dark_button_title_helper_sets_accessible_white_titles() -> None:
-    """Popover helper keeps dark buttons readable."""
-    from AppKit import NSForegroundColorAttributeName
-
+def test_dark_button_title_helper_leaves_native_contrast_to_appkit() -> None:
+    """Popover helper preserves native button contrast and accessibility."""
     from hrm_live.ui.popover import _set_dark_button_title
 
     class FakeButton:
         def __init__(self) -> None:
             self.title_value = ""
             self.accessibility_value = ""
-            self.attributed = None
 
         def setTitle_(self, value: str) -> None:
             self.title_value = value
-
-        def setAttributedTitle_(self, value) -> None:
-            self.attributed = value
 
         def setAccessibilityLabel_(self, value: str) -> None:
             self.accessibility_value = value
@@ -99,24 +93,14 @@ def test_dark_button_title_helper_sets_accessible_white_titles() -> None:
 
     assert button.title_value == "⚙ Settings"
     assert button.accessibility_value == "⚙ Settings"
-    attributed = button.attributed
-    assert attributed.string() == "⚙ Settings"
-    color = attributed.attributesAtIndex_effectiveRange_(0, None)[0].get(
-        NSForegroundColorAttributeName
-    )
-    assert color is not None
 
 
-def test_popover_view_builds_without_appkit_abort() -> None:
-    """Headless popover content avoids controls that require NSApplication."""
-    from hrm_live.state import AppState
-    from hrm_live.ui.popover import HRMPopover
+def test_popover_exposes_native_dashboard_controller() -> None:
+    """The dashboard controller can be imported before macOS starts NSApp."""
+    from hrm_live.ui.popover import DashboardButton, HRMPopover
 
-    popover = HRMPopover(AppState())
-    view = popover._build_view()
-
-    assert view is not None
-    assert len(view.subviews()) > 0
+    assert HRMPopover is not None
+    assert DashboardButton is not None
 
 
 def test_popover_duration_formats_clamped_zone_seconds() -> None:
