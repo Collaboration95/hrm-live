@@ -97,10 +97,10 @@ def test_dark_button_title_helper_leaves_native_contrast_to_appkit() -> None:
 
 def test_popover_exposes_native_dashboard_controller() -> None:
     """The dashboard controller can be imported before macOS starts NSApp."""
-    from hrm_live.ui.popover import DashboardButton, HRMPopover
+    from hrm_live.ui.popover import HRMPopover, _make_dashboard_button
 
     assert HRMPopover is not None
-    assert DashboardButton is not None
+    assert _make_dashboard_button is not None
 
 
 def test_popover_duration_formats_clamped_zone_seconds() -> None:

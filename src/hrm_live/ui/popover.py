@@ -22,6 +22,7 @@ from typing import Any
 
 import objc
 from AppKit import (
+    NSAttributedString,
     NSBezelStyleRounded,
     NSBezierPath,
     NSButton,
@@ -106,7 +107,7 @@ class HRMPopover:
         self._gauge_view: DonutGaugeView | None = None
         self._graph_image_view: NSImageView | None = None
         self._graph_placeholder: NSTextField | None = None
-        self._trend_buttons: list[DashboardButton] = []
+        self._trend_buttons: list[NSButton] = []
         self._session_stats_label: NSTextField | None = None
         self._zone_bar_container: NSView | None = None
         self._session_button: NSButton | None = None
@@ -203,7 +204,9 @@ class HRMPopover:
         self._update_graph(s, max_hr, zones_cfg, colors_cfg)
         selected_segment = self._trend_segment_for_minutes(s.config)
         for idx, button in enumerate(self._trend_buttons):
-            button.setVisualStyle_("selected" if idx == selected_segment else "secondary")
+            _set_dashboard_button_style(
+                button, "selected" if idx == selected_segment else "secondary"
+            )
 
         # ── Session card ────────────────────────────────────────────
         self._update_session(s, colors_cfg)
@@ -757,7 +760,7 @@ class HRMPopover:
         if self._session_button:
             title = "■ Stop & Save" if s.session_active else "▶ Start Session"
             self._session_button.setTitle_(title)
-            self._session_button.setVisualStyle_("primary")
+            _set_dashboard_button_style(self._session_button, "primary")
             action = "stop_session:" if s.session_active else "start_session:"
             self._session_button.setAction_(action)
         self._rebuild_export_controls(s)
@@ -1192,54 +1195,6 @@ class ColoredRectView(NSView):
             log.exception("Failed to draw colored view")
 
 
-class DashboardButton(NSButton):
-    """A high-contrast dashboard button independent of app appearance."""
-
-    _STYLE_COLORS = {
-        "primary": ("#0A84FF", "#FFFFFF", "#0A84FF"),
-        "selected": ("#245A8D", "#FFFFFF", "#58B8FF"),
-        "secondary": ("#343434", "#FFFFFF", "#5A5A5A"),
-    }
-
-    def initWithFrame_style_(self, frame: tuple, style: str) -> DashboardButton:
-        self = objc.super(DashboardButton, self).initWithFrame_(frame)
-        if self:
-            self._visual_style = style
-            self.setBordered_(False)
-        return self
-
-    def setVisualStyle_(self, style: str) -> None:
-        self._visual_style = style
-        self.setNeedsDisplay_(True)
-
-    def drawRect_(self, rect: tuple) -> None:
-        fill_hex, text_hex, border_hex = self._STYLE_COLORS.get(
-            self._visual_style, self._STYLE_COLORS["secondary"]
-        )
-        bounds = self.bounds()
-        radius = min(7, bounds.size.height / 2)
-        path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(bounds, radius, radius)
-        _ns_color(fill_hex).setFill()
-        path.fill()
-        path.setLineWidth_(1)
-        _ns_color(border_hex).setStroke()
-        path.stroke()
-
-        attrs = {
-            NSFontAttributeName: NSFont.systemFontOfSize_weight_(13, 0.3),
-            NSForegroundColorAttributeName: _ns_color(text_hex),
-        }
-        title = NSString.alloc().initWithString_(self.title())
-        text_size = title.sizeWithAttributes_(attrs)
-        title.drawAtPoint_withAttributes_(
-            (
-                (bounds.size.width - text_size.width) / 2,
-                (bounds.size.height - text_size.height) / 2,
-            ),
-            attrs,
-        )
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -1280,11 +1235,43 @@ def _make_label(text: str, font: NSFont, color: NSColor, frame: tuple) -> NSText
     return f
 
 
-def _make_dashboard_button(frame: tuple, title: str, style: str) -> DashboardButton:
-    """Create a dashboard button with guaranteed contrast and a clear role."""
-    button = DashboardButton.alloc().initWithFrame_style_(_rect(frame), style)
+_DASHBOARD_BUTTON_COLORS = {
+    "primary": ("#0A84FF", "#FFFFFF", "#0A84FF"),
+    "selected": ("#245A8D", "#FFFFFF", "#58B8FF"),
+    "secondary": ("#343434", "#FFFFFF", "#5A5A5A"),
+}
+
+
+def _set_dashboard_button_style(button: NSButton, style: str) -> None:
+    """Apply a persistent contrast-safe style to an existing button."""
+    fill_hex, text_hex, border_hex = _DASHBOARD_BUTTON_COLORS.get(
+        style, _DASHBOARD_BUTTON_COLORS["secondary"]
+    )
+    layer = button.layer()
+    layer.setBackgroundColor_(_ns_color(fill_hex).CGColor())
+    layer.setBorderColor_(_ns_color(border_hex).CGColor())
+    attrs = {
+        NSFontAttributeName: NSFont.systemFontOfSize_weight_(13, 0.3),
+        NSForegroundColorAttributeName: _ns_color(text_hex),
+    }
+    button.setAttributedTitle_(
+        NSAttributedString.alloc().initWithString_attributes_(button.title(), attrs)
+    )
+    button._dashboard_style = style
+
+
+def _make_dashboard_button(frame: tuple, title: str, style: str) -> NSButton:
+    """Create an AppKit button with a persistent, high-contrast idle state."""
+    button = NSButton.alloc().initWithFrame_(_rect(frame))
+    button.setBezelStyle_(NSBezelStyleRounded)
+    button.setBordered_(False)
+    button.setWantsLayer_(True)
+    layer = button.layer()
+    layer.setBorderWidth_(1.0)
+    layer.setCornerRadius_(7.0)
     button.setTitle_(title)
     button.setAccessibilityLabel_(title)
+    _set_dashboard_button_style(button, style)
     return button
 
 

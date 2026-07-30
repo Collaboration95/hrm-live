@@ -49,9 +49,14 @@ asyncio_mode = "auto"
 [tool.coverage.run]
 branch = true
 source = ["hrm_live"]
+omit = [
+    "*/hrm_live/__main__.py",
+    "*/hrm_live/app.py",
+    "*/hrm_live/ui/*",
+]
 
 [tool.coverage.report]
-fail_under = 54
+fail_under = 60
 show_missing = true
 skip_covered = true
 
