@@ -1257,7 +1257,6 @@ def _set_dashboard_button_style(button: NSButton, style: str) -> None:
     button.setAttributedTitle_(
         NSAttributedString.alloc().initWithString_attributes_(button.title(), attrs)
     )
-    button._dashboard_style = style
 
 
 def _make_dashboard_button(frame: tuple, title: str, style: str) -> NSButton:
