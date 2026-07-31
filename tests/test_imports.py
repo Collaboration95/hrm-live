@@ -307,6 +307,55 @@ def test_settings_panel_headless_guard() -> None:
         SettingsWindow(AppState())._build_panel()
 
 
+def test_settings_panel_is_activatable() -> None:
+    """Settings must be a normal key window after the popover closes."""
+    from AppKit import NSWindowStyleMaskNonactivatingPanel
+
+    from hrm_live.ui.settings import SETTINGS_PANEL_STYLE_MASK
+
+    assert SETTINGS_PANEL_STYLE_MASK & NSWindowStyleMaskNonactivatingPanel == 0
+
+
+def test_settings_show_raises_existing_panel() -> None:
+    """Repeated Settings clicks reuse and raise the existing panel."""
+    from hrm_live.state import AppState
+    from hrm_live.ui.settings import SettingsWindow
+
+    class FakeApp:
+        def activateIgnoringOtherApps_(self, value: bool) -> None:
+            assert value is True
+
+    class FakePanel:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def isVisible(self) -> bool:
+            return True
+
+        def makeKeyAndOrderFront_(self, sender: object) -> None:
+            self.calls.append("make-key")
+
+        def orderFrontRegardless(self) -> None:
+            self.calls.append("order-regardless")
+
+    window = SettingsWindow(AppState())
+    panel = FakePanel()
+    window._panel = panel  # type: ignore[assignment]
+
+    with patch("hrm_live.ui.settings.NSApp", return_value=FakeApp()):
+        window.show()
+
+    assert panel.calls == ["make-key", "order-regardless"]
+
+
+def test_settings_rect_helper_returns_appkit_nsrect() -> None:
+    """Flat settings frames are normalized before entering PyObjC APIs."""
+    from hrm_live.ui.settings import _rect
+
+    assert _rect((10, 20, 30, 40)) == ((10, 20), (30, 40))
+    assert _rect(((10, 20), (30, 40))) == ((10, 20), (30, 40))
+
+
 def test_settings_scan_callbacks_use_injected_functions() -> None:
     """Settings actions delegate scan work to injected callbacks."""
     from hrm_live.state import AppState, DiscoveredDevice
