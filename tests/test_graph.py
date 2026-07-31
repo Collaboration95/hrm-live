@@ -3,7 +3,13 @@
 from collections import deque
 from datetime import UTC, datetime, timedelta
 
-from hrm_live.ui.graph import render_graph, summarize_heart_rate
+from hrm_live.ui.graph import (
+    _chart_y_limits,
+    _elapsed_tick_offsets,
+    _format_elapsed_tick,
+    render_graph,
+    summarize_heart_rate,
+)
 
 
 def _make_ring_buffer(bpms: list[int], start_bpm: int = 60) -> deque:
@@ -89,6 +95,19 @@ def test_summarize_heart_rate_uses_selected_window() -> None:
 
 def test_summarize_heart_rate_empty_buffer() -> None:
     assert summarize_heart_rate(deque(maxlen=600), window_minutes=10) is None
+
+
+def test_elapsed_tick_labels_are_relative_and_unique() -> None:
+    assert _format_elapsed_tick(0, 45) == "0s"
+    assert _format_elapsed_tick(15, 45) == "15s"
+    assert _format_elapsed_tick(60, 120) == "1:00"
+    assert _format_elapsed_tick(125, 300) == "2:05"
+    assert _elapsed_tick_offsets(11) == [0.0, 5.0, 10.0, 11.0]
+
+
+def test_chart_y_limits_focus_on_visible_readings() -> None:
+    assert _chart_y_limits([68, 72]) == (60, 80)
+    assert _chart_y_limits([60, 160]) == (40, 180)
 
 
 def test_render_line_changes_color_across_zones(monkeypatch) -> None:

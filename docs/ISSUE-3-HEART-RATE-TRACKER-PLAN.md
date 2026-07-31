@@ -54,3 +54,12 @@ the heart-rate zone.
   paths.
 - Manual smoke test compares the result against the attached reference for
   hierarchy, contrast, and visual emphasis.
+
+## Follow-up correction — axis labels and scale
+
+The native smoke test exposed two problems in the first tracker iteration:
+short traces displayed the same wall-clock minute on every X-axis tick, and a
+fixed 0–maximum-HR Y-axis compressed low-intensity readings into a flat strip.
+The renderer now uses relative elapsed labels with clean tick intervals and
+automatically focuses the Y-axis on the visible BPM range while retaining
+zone-band context.

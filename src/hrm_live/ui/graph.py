@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import os
 import tempfile
 from collections.abc import Sequence
@@ -29,7 +30,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator
 
 from hrm_live.ui.tokens import (
     CANVAS,
@@ -100,6 +101,54 @@ def _chart_color_for_bpm(
     """Resolve the saturated line color for one BPM value."""
     zone = get_zone(int(round(bpm)), max_hr, zones)
     return zone_colors.get(zone, _CHART_ZONE_COLORS_DEFAULT["Z1"])
+
+
+def _format_elapsed_tick(elapsed_seconds: float, span_seconds: float) -> str:
+    """Format a relative chart tick without repeating wall-clock minutes."""
+    elapsed = max(0, int(round(elapsed_seconds)))
+    if span_seconds < 60:
+        return f"{elapsed}s"
+    minutes, seconds = divmod(elapsed, 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def _elapsed_tick_offsets(span_seconds: float) -> list[float]:
+    """Choose clean elapsed-time tick positions and always include the end."""
+    if span_seconds <= 0:
+        return [0.0]
+
+    locator = MaxNLocator(nbins=4, integer=True, steps=[1, 2, 5, 10])
+    offsets = [
+        float(value) for value in locator.tick_values(0, span_seconds) if 0 <= value <= span_seconds
+    ]
+    if not offsets:
+        offsets = [0.0]
+    if offsets[-1] < span_seconds:
+        offsets.append(span_seconds)
+    return offsets
+
+
+def _chart_y_limits(bpms: Sequence[int]) -> tuple[float, float]:
+    """Return readable BPM bounds centered on the visible readings."""
+    data_min = min(bpms)
+    data_max = max(bpms)
+    data_span = data_max - data_min
+    padding = max(8.0, data_span * 0.2)
+    lower = max(0.0, data_min - padding)
+    upper = data_max + padding
+
+    # A nearly flat trace still needs enough vertical breathing room to read
+    # as a chart rather than a line pinned to one pixel row.
+    if upper - lower < 20:
+        midpoint = (data_min + data_max) / 2
+        lower = max(0.0, midpoint - 10)
+        upper = midpoint + 10
+
+    # Keep the bounds on familiar five-BPM increments so the tick labels are
+    # easy to scan in the narrow popover.
+    lower = math.floor(lower / 5) * 5
+    upper = math.ceil(upper / 5) * 5
+    return lower, upper
 
 
 def render_graph(
@@ -210,15 +259,36 @@ def render_graph(
                 zorder=4,
             )
 
-    # Style
+    # Style.  Use elapsed time from the first visible reading instead of a
+    # wall-clock formatter: second-level samples otherwise render as the same
+    # repeated ``15:43`` label throughout a short window.
     if timestamps[0] != timestamps[-1]:
-        ax.set_xlim(timestamps[0], timestamps[-1])
+        axis_start = timestamps[0]
+        axis_end = timestamps[-1]
     else:
-        # Single data point — add 30s padding on each side
+        # Single data point — add 30s padding on each side.
         pad = timedelta(seconds=30)
-        ax.set_xlim(timestamps[0] - pad, timestamps[-1] + pad)
-    ax.set_ylim(0, max_hr * 1.15)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        axis_start = timestamps[0] - pad
+        axis_end = timestamps[-1] + pad
+    ax.set_xlim(axis_start, axis_end)
+
+    axis_start_num = mdates.date2num(axis_start)
+    axis_end_num = mdates.date2num(axis_end)
+    span_seconds = max(0.0, (axis_end_num - axis_start_num) * 86400)
+    tick_offsets = _elapsed_tick_offsets(span_seconds)
+    tick_values = [axis_start_num + offset / 86400 for offset in tick_offsets]
+    ax.xaxis.set_major_locator(FixedLocator(tick_values))
+    ax.xaxis.set_major_formatter(
+        FuncFormatter(
+            lambda value, _: _format_elapsed_tick(
+                (value - axis_start_num) * 86400,
+                span_seconds,
+            )
+        )
+    )
+
+    lower, upper = _chart_y_limits(bpms)
+    ax.set_ylim(lower, upper)
     ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
     ax.tick_params(colors=TEXT_SECONDARY, labelsize=9, length=0, pad=4)
     ax.grid(axis="y", color=DIVIDER, linewidth=0.7, alpha=0.65)
