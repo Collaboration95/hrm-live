@@ -48,7 +48,7 @@ from Foundation import NSURL, NSString
 import hrm_live.config as cfg_mod
 import hrm_live.session as sess_mod
 from hrm_live.state import AppState, ExportSnapshot, UISnapshot
-from hrm_live.ui.graph import render_graph
+from hrm_live.ui.graph import render_graph, summarize_heart_rate
 from hrm_live.ui.tokens import (
     CANVAS,
     CARD_PADDING,
@@ -79,6 +79,7 @@ log = logging.getLogger(__name__)
 POPOVER_WIDTH = 344
 RECENT_SESSION_ROWS = 4
 HERO_GAUGE_SIZE = 164
+TREND_HEADER_HEIGHT = 48
 # Keep the popover vertically anchored to the status-item button.  Passing
 # ``0`` here means ``NSRectEdgeMinX`` and places the popover to the left.
 POPOVER_PREFERRED_EDGE = NSRectEdgeMinY
@@ -110,6 +111,8 @@ class HRMPopover:
         self._gauge_view: DonutGaugeView | None = None
         self._graph_image_view: NSImageView | None = None
         self._graph_placeholder: NSTextField | None = None
+        self._graph_average_value: NSTextField | None = None
+        self._graph_range_value: NSTextField | None = None
         self._trend_buttons: list[NSButton] = []
         self._session_stats_label: NSTextField | None = None
         self._zone_bar_container: NSView | None = None
@@ -226,7 +229,9 @@ class HRMPopover:
         # estimate was too short, which clipped controls at the bottom.
         header_h = 36 + SECTION_GAP
         hero_h = HERO_GAUGE_SIZE + 26 + CARD_PADDING * 2 + INLINE_GAP + SECTION_GAP_LARGE
-        trend_h = 24 + INLINE_GAP + 34 + INLINE_GAP + GRAPH_HEIGHT + CARD_PADDING * 2
+        trend_h = (
+            TREND_HEADER_HEIGHT + INLINE_GAP + 34 + INLINE_GAP + GRAPH_HEIGHT + CARD_PADDING * 2
+        )
         trend_h += INLINE_GAP + SECTION_GAP_LARGE
         session_h = 24 + INLINE_GAP + 42 + INLINE_GAP + 96 + CARD_PADDING * 2
         session_h += INLINE_GAP + SECTION_GAP
@@ -337,7 +342,7 @@ class HRMPopover:
         self._header_device_label = dev_label
 
         # A labelled control is easier to discover than the old icon-only
-        # 28 pt gear against a dark dashboard surface.
+        # 28 pt gear against the dashboard surface.
         gear_btn = _make_dashboard_button(
             ((POPOVER_WIDTH - OUTER_PADDING - 96, y - 32), (96, 32)),
             "⚙  Settings",
@@ -448,7 +453,7 @@ class HRMPopover:
         """Build the trend card: range selector + graph."""
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
-        header_h = 24
+        header_h = TREND_HEADER_HEIGHT
         selector_h = 34
         gap = INLINE_GAP
         card_h = header_h + gap + selector_h + gap + GRAPH_HEIGHT + CARD_PADDING * 2
@@ -460,18 +465,57 @@ class HRMPopover:
 
         cy = y - CARD_PADDING
 
-        # Section header
+        # Section header and the two glanceable values used by the tracker.
         trend_header = _make_label(
             "Heart Rate",
-            NSFont.systemFontOfSize_(LABEL),
+            NSFont.systemFontOfSize_weight_(16, 0.4),
             _ns_color(TEXT_PRIMARY),
-            (x + CARD_PADDING, cy - header_h, 120, header_h),
+            (x + CARD_PADDING, cy - 30, 92, 24),
         )
         root.addSubview_(trend_header)
 
+        summary_x = x + CARD_PADDING + 96
+        summary_right = x + card_w - CARD_PADDING
+        average_caption = _make_label(
+            "AVERAGE",
+            NSFont.systemFontOfSize_(10),
+            _ns_color(TEXT_SECONDARY),
+            (summary_x, cy - 16, 78, 12),
+        )
+        average_caption.setAlignment_(2)
+        root.addSubview_(average_caption)
+        average_value = _make_label(
+            "—",
+            NSFont.monospacedDigitSystemFontOfSize_weight_(16, 0.4),
+            _ns_color(TEXT_ACCENT),
+            (summary_x, cy - 40, 78, 20),
+        )
+        average_value.setAlignment_(2)
+        root.addSubview_(average_value)
+        self._graph_average_value = average_value
+
+        range_x = summary_x + 86
+        range_caption = _make_label(
+            "RANGE",
+            NSFont.systemFontOfSize_(10),
+            _ns_color(TEXT_SECONDARY),
+            (range_x, cy - 16, summary_right - range_x, 12),
+        )
+        range_caption.setAlignment_(2)
+        root.addSubview_(range_caption)
+        range_value = _make_label(
+            "—",
+            NSFont.monospacedDigitSystemFontOfSize_weight_(16, 0.4),
+            _ns_color(TEXT_PRIMARY),
+            (range_x, cy - 40, summary_right - range_x, 20),
+        )
+        range_value.setAlignment_(2)
+        root.addSubview_(range_value)
+        self._graph_range_value = range_value
+
         cy -= header_h + gap
 
-        # Explicit buttons retain their contrast on the dark surface; native
+        # Explicit buttons retain their contrast on the light surface; native
         # segmented controls were rendering as unreadable black capsules.
         selected = self._trend_segment_for_minutes(s.config)
         selector_w = (card_w - 2 * CARD_PADDING - 2 * INLINE_GAP) / 3
@@ -552,6 +596,7 @@ class HRMPopover:
             return
 
         window_minutes = (s.config or {}).get("graph_window_minutes", 10)
+        self._update_graph_summary(s, window_minutes)
 
         if s.ring_buffer:
             key = (
@@ -586,6 +631,22 @@ class HRMPopover:
         self._graph_image_view.setHidden_(True)
         self._graph_placeholder.setStringValue_(_empty_graph_placeholder(s))
         self._graph_placeholder.setHidden_(False)
+
+    def _update_graph_summary(self, s: UISnapshot, window_minutes: int) -> None:
+        """Keep the tracker summary aligned with the visible graph window."""
+        summary = summarize_heart_rate(s.ring_buffer, window_minutes)
+        if summary is None:
+            average_text = "—"
+            range_text = "—"
+        else:
+            average, minimum, maximum = summary
+            average_text = f"{average:.0f} bpm"
+            range_text = f"{minimum}–{maximum} bpm"
+
+        if self._graph_average_value:
+            self._graph_average_value.setStringValue_(average_text)
+        if self._graph_range_value:
+            self._graph_range_value.setStringValue_(range_text)
 
     # ── Session Card ────────────────────────────────────────────────────
 

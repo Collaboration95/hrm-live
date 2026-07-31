@@ -17,7 +17,7 @@ import logging
 import os
 import tempfile
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 _MPLCONFIGDIR = Path(tempfile.gettempdir()) / "hrm-live-matplotlib"
@@ -29,20 +29,77 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from hrm_live.ui.tokens import (
     CANVAS,
     DIVIDER,
-    TEXT_ACCENT,
     TEXT_SECONDARY,
     ZONE_COLORS_DEFAULT,
 )
+from hrm_live.zones import get_zone
 
 log = logging.getLogger(__name__)
 
 # Default zone colors for graph bands
 _ZONE_BAND_COLORS = dict(ZONE_COLORS_DEFAULT)
 _DEFAULT_ZONES = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
+_LEGACY_ZONE_COLORS = {
+    "Z1": "#888888",
+    "Z2": "#4CAF50",
+    "Z3": "#FF9800",
+    "Z4": "#F44336",
+}
+_CHART_ZONE_COLORS_DEFAULT = {
+    # These saturated chart accents follow the visual language of the
+    # reference tracker while keeping the dashboard's semantic tokens intact.
+    "Z1": "#2BC7B7",
+    "Z2": "#F2D33B",
+    "Z3": "#FF8A3D",
+    "Z4": "#ED3C70",
+}
+
+
+def _windowed_readings(
+    ring_buffer: Sequence[tuple[datetime, int]], window_minutes: int
+) -> list[tuple[datetime, int]]:
+    """Return readings in the selected rolling window, newest timestamp last."""
+    if not ring_buffer:
+        return []
+
+    now = ring_buffer[-1][0]
+    cutoff = now.timestamp() - window_minutes * 60
+    return [(timestamp, bpm) for timestamp, bpm in ring_buffer if timestamp.timestamp() >= cutoff]
+
+
+def summarize_heart_rate(
+    ring_buffer: Sequence[tuple[datetime, int]], window_minutes: int = 10
+) -> tuple[float, int, int] | None:
+    """Return average, minimum, and maximum BPM for the selected window."""
+    readings = _windowed_readings(ring_buffer, window_minutes)
+    if not readings:
+        return None
+
+    bpms = [bpm for _, bpm in readings]
+    return (sum(bpms) / len(bpms), min(bpms), max(bpms))
+
+
+def _resolve_chart_colors(zone_colors: dict[str, str] | None) -> dict[str, str]:
+    """Use vivid chart defaults while preserving explicit user colors."""
+    if not zone_colors or zone_colors in (_ZONE_BAND_COLORS, _LEGACY_ZONE_COLORS):
+        return dict(_CHART_ZONE_COLORS_DEFAULT)
+    return {**_CHART_ZONE_COLORS_DEFAULT, **zone_colors}
+
+
+def _chart_color_for_bpm(
+    bpm: float,
+    max_hr: int,
+    zones: dict[str, float],
+    zone_colors: dict[str, str],
+) -> str:
+    """Resolve the saturated line color for one BPM value."""
+    zone = get_zone(int(round(bpm)), max_hr, zones)
+    return zone_colors.get(zone, _CHART_ZONE_COLORS_DEFAULT["Z1"])
 
 
 def render_graph(
@@ -78,13 +135,11 @@ def render_graph(
     # while configuration is being replaced, so rendering must not assume all
     # nested keys are present.
     zones = {**_DEFAULT_ZONES, **(zones or {})}
-    zone_colors = {**_ZONE_BAND_COLORS, **(zone_colors or {})}
+    zone_colors = _resolve_chart_colors(zone_colors)
 
-    now = ring_buffer[-1][0]
-
-    # Filter data within the window
-    cutoff = now.timestamp() - window_minutes * 60
-    filtered = [(ts, bpm) for ts, bpm in ring_buffer if ts.timestamp() >= cutoff]
+    # Filter data within the window.  The same helper powers the summary text
+    # so the numbers and plotted points always describe the same readings.
+    filtered = _windowed_readings(ring_buffer, window_minutes)
 
     if not filtered:
         return None
@@ -103,28 +158,26 @@ def render_graph(
     ax.set_facecolor(CANVAS)
 
     # Zone bands (fill between)
-    ax.axhspan(
-        0, z1_bpm, facecolor=zone_colors.get("Z1", _ZONE_BAND_COLORS["Z1"]), alpha=0.25, zorder=0
-    )
+    ax.axhspan(0, z1_bpm, facecolor=zone_colors["Z1"], alpha=0.14, zorder=0)
     ax.axhspan(
         z1_bpm,
         z2_bpm,
-        facecolor=zone_colors.get("Z2", _ZONE_BAND_COLORS["Z2"]),
-        alpha=0.25,
+        facecolor=zone_colors["Z2"],
+        alpha=0.14,
         zorder=0,
     )
     ax.axhspan(
         z2_bpm,
         z3_bpm,
-        facecolor=zone_colors.get("Z3", _ZONE_BAND_COLORS["Z3"]),
-        alpha=0.25,
+        facecolor=zone_colors["Z3"],
+        alpha=0.14,
         zorder=0,
     )
     ax.axhspan(
         z3_bpm,
         max_hr * 1.15,
-        facecolor=zone_colors.get("Z4", _ZONE_BAND_COLORS["Z4"]),
-        alpha=0.25,
+        facecolor=zone_colors["Z4"],
+        alpha=0.14,
         zorder=0,
     )
 
@@ -133,8 +186,29 @@ def render_graph(
         color = DIVIDER
         ax.axhline(bpm_val, color=color, linewidth=0.5, linestyle="--", alpha=0.5)
 
-    # HR line
-    ax.plot(timestamps, bpms, color=TEXT_ACCENT, linewidth=1.8, zorder=3)
+    # HR line: each segment follows the zone of its midpoint, making effort
+    # changes visible immediately instead of hiding them in one blue stroke.
+    if len(timestamps) == 1:
+        ax.plot(
+            timestamps,
+            bpms,
+            color=_chart_color_for_bpm(bpms[0], max_hr, zones, zone_colors),
+            marker="o",
+            markersize=5,
+            linewidth=0,
+            zorder=4,
+        )
+    else:
+        for index in range(len(timestamps) - 1):
+            midpoint = (bpms[index] + bpms[index + 1]) / 2
+            ax.plot(
+                timestamps[index : index + 2],
+                bpms[index : index + 2],
+                color=_chart_color_for_bpm(midpoint, max_hr, zones, zone_colors),
+                linewidth=2.6,
+                solid_capstyle="round",
+                zorder=4,
+            )
 
     # Style
     if timestamps[0] != timestamps[-1]:
@@ -145,10 +219,16 @@ def render_graph(
         ax.set_xlim(timestamps[0] - pad, timestamps[-1] + pad)
     ax.set_ylim(0, max_hr * 1.15)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    ax.tick_params(colors=TEXT_SECONDARY, labelsize=8)
-    for spine in ax.spines.values():
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+    ax.tick_params(colors=TEXT_SECONDARY, labelsize=9, length=0, pad=4)
+    ax.grid(axis="y", color=DIVIDER, linewidth=0.7, alpha=0.65)
+    ax.set_axisbelow(True)
+    for side, spine in ax.spines.items():
         spine.set_color(DIVIDER)
-    ax.set_ylabel("BPM", color=TEXT_SECONDARY, fontsize=8)
+        spine.set_linewidth(0.8)
+        if side in {"top", "right"}:
+            spine.set_visible(False)
+    ax.set_ylabel("BPM", color=TEXT_SECONDARY, fontsize=9, labelpad=6)
 
     # Tight layout
     fig.tight_layout(pad=0.5)
