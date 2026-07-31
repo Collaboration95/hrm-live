@@ -29,10 +29,10 @@ def test_default_config_values() -> None:
     assert cfg["zones"]["z1_max"] == 0.60
     assert cfg["zones"]["z2_max"] == 0.75
     assert cfg["zones"]["z3_max"] == 0.88
-    assert cfg["zone_colors"]["Z1"] == "#888888"
-    assert cfg["zone_colors"]["Z2"] == "#4CAF50"
-    assert cfg["zone_colors"]["Z3"] == "#FF9800"
-    assert cfg["zone_colors"]["Z4"] == "#F44336"
+    assert cfg["zone_colors"]["Z1"] == "#8E8E93"
+    assert cfg["zone_colors"]["Z2"] == "#34C759"
+    assert cfg["zone_colors"]["Z3"] == "#FF9F0A"
+    assert cfg["zone_colors"]["Z4"] == "#FF375F"
     assert cfg["graph_window_minutes"] == 10
 
 

@@ -46,6 +46,7 @@ from hrm_live.ui.tokens import (
     INLINE_GAP,
     OUTER_PADDING,
     TEXT_SECONDARY,
+    TEXT_TERTIARY,
 )
 from hrm_live.zones import DEFAULT_COLORS, ZONE_ORDER, validate_zones
 
@@ -820,7 +821,7 @@ class SettingsWindow:
             b = int(rgb.blueComponent() * 255)
             return f"#{r:02X}{g:02X}{b:02X}"
         except Exception:
-            return "#888888"
+            return TEXT_TERTIARY
 
     def _set_text(self, key: str, value: str) -> None:
         control = self._controls.get(key)

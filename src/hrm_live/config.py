@@ -14,6 +14,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from hrm_live.ui.tokens import ZONE_COLORS_DEFAULT
+
 # ── Defaults ─────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -25,12 +27,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "z2_max": 0.75,
         "z3_max": 0.88,
     },
-    "zone_colors": {
-        "Z1": "#888888",
-        "Z2": "#4CAF50",
-        "Z3": "#FF9800",
-        "Z4": "#F44336",
-    },
+    "zone_colors": dict(ZONE_COLORS_DEFAULT),
     "graph_window_minutes": 10,
 }
 

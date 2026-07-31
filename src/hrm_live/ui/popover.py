@@ -65,6 +65,8 @@ from hrm_live.ui.tokens import (
     STATUS_ERROR,
     STATUS_RECONNECTING,
     SURFACE,
+    SURFACE_ALT,
+    TEXT_ACCENT,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
     TEXT_TERTIARY,
@@ -692,7 +694,7 @@ class HRMPopover:
             bar_x = 34
             bar_max_w = bar_area_w - bar_x - 72
             track = ColoredRectView.alloc().initWithFrame_(((bar_x, row_y + 5), (bar_max_w, 14)))
-            track.setColor_(_ns_color("#343434"))
+            track.setColor_(_ns_color(SURFACE_ALT))
             track.setCornerRadius_(7)
             container.addSubview_(track)
             frac = seconds / total
@@ -1087,7 +1089,7 @@ class DonutGaugeView(NSView):
             (cx, cy), radius, 0, 360, False
         )
         bg_path.setLineWidth_(GAUGE_LINE_WIDTH - 2)
-        _ns_color("#333333").setStroke()
+        _ns_color(SURFACE_ALT).setStroke()
         bg_path.stroke()
 
         # Active arc
@@ -1122,7 +1124,7 @@ class DonutGaugeView(NSView):
                         (cx + tick_outer_r * m.cos(rad), cy + tick_outer_r * m.sin(rad))
                     )
                     tick_path.setLineWidth_(1.5)
-                    _ns_color("#666666").setStroke()
+                    _ns_color(DIVIDER).setStroke()
                     tick_path.stroke()
 
             # One legible numeric reading lives inside the dial.
@@ -1213,9 +1215,9 @@ def _make_label(text: str, font: NSFont, color: NSColor, frame: tuple) -> NSText
 
 
 _DASHBOARD_BUTTON_COLORS = {
-    "primary": ("#0A84FF", "#FFFFFF", "#0A84FF"),
-    "selected": ("#245A8D", "#FFFFFF", "#58B8FF"),
-    "secondary": ("#343434", "#FFFFFF", "#5A5A5A"),
+    "primary": (TEXT_ACCENT, "#FFFFFF", TEXT_ACCENT),
+    "selected": ("#D9ECFF", TEXT_PRIMARY, TEXT_ACCENT),
+    "secondary": (SURFACE_ALT, TEXT_PRIMARY, DIVIDER),
 }
 
 

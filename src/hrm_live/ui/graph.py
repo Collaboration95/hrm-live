@@ -30,15 +30,18 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 
+from hrm_live.ui.tokens import (
+    CANVAS,
+    DIVIDER,
+    TEXT_ACCENT,
+    TEXT_SECONDARY,
+    ZONE_COLORS_DEFAULT,
+)
+
 log = logging.getLogger(__name__)
 
 # Default zone colors for graph bands
-_ZONE_BAND_COLORS = {
-    "Z1": "#e0e0e0",
-    "Z2": "#a5d6a7",
-    "Z3": "#ffcc80",
-    "Z4": "#ef9a9a",
-}
+_ZONE_BAND_COLORS = dict(ZONE_COLORS_DEFAULT)
 _DEFAULT_ZONES = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
 
 
@@ -96,8 +99,8 @@ def render_graph(
 
     # ── Plot ─────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(4.5, 2.2), dpi=100)
-    fig.patch.set_facecolor("#1e1e1e")
-    ax.set_facecolor("#1e1e1e")
+    fig.patch.set_facecolor(CANVAS)
+    ax.set_facecolor(CANVAS)
 
     # Zone bands (fill between)
     ax.axhspan(
@@ -126,11 +129,12 @@ def render_graph(
     )
 
     # Zone boundary lines (dashed)
-    for bpm_val, color in [(z1_bpm, "#888888"), (z2_bpm, "#888888"), (z3_bpm, "#888888")]:
+    for bpm_val in (z1_bpm, z2_bpm, z3_bpm):
+        color = DIVIDER
         ax.axhline(bpm_val, color=color, linewidth=0.5, linestyle="--", alpha=0.5)
 
     # HR line
-    ax.plot(timestamps, bpms, color="#4fc3f7", linewidth=1.5, zorder=3)
+    ax.plot(timestamps, bpms, color=TEXT_ACCENT, linewidth=1.8, zorder=3)
 
     # Style
     if timestamps[0] != timestamps[-1]:
@@ -141,10 +145,10 @@ def render_graph(
         ax.set_xlim(timestamps[0] - pad, timestamps[-1] + pad)
     ax.set_ylim(0, max_hr * 1.15)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    ax.tick_params(colors="#aaaaaa", labelsize=8)
+    ax.tick_params(colors=TEXT_SECONDARY, labelsize=8)
     for spine in ax.spines.values():
-        spine.set_color("#444444")
-    ax.set_ylabel("BPM", color="#aaaaaa", fontsize=8)
+        spine.set_color(DIVIDER)
+    ax.set_ylabel("BPM", color=TEXT_SECONDARY, fontsize=8)
 
     # Tight layout
     fig.tight_layout(pad=0.5)
