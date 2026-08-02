@@ -58,7 +58,7 @@ rebuilt and signed through the authorized Developer ID process after this gate.
 | Check | Required result | Result / evidence |
 | --- | --- | --- |
 | `make install` | Dependencies install without unpinned local edits | ✅ Passed |
-| `make check` | Ruff, mypy, 121+ tests, coverage threshold, compileall pass | ✅ 121 passed, 58% coverage (threshold 54%), ruff/mypy/compileall clean |
+| `make check` | Ruff, mypy, 160+ tests, coverage threshold, compileall pass | ✅ 164 passed, 76% coverage (threshold 60%), ruff/mypy/compileall clean |
 | `make package` | Bundle builds, contains `HRMLive.icns`, verifies internal signature and Bluetooth metadata | ✅ **v0.9.0**: `dist/HRM Live.app` built; codesign verify pass; Bluetooth usage strings + LSUIElement=true present |
 | `codesign --verify --deep --strict` on ad-hoc artifact | Passes (ad-hoc) | ✅ Passed |
 | `codesign --verify --deep --strict` on final artifact | Passes after Developer ID signing | |

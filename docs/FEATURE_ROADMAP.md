@@ -30,7 +30,7 @@ concrete issues.
 | Area | Evidence / cause | Product decision |
 | --- | --- | --- |
 | Menu-bar BPM looks dim | `menubar.py` applies the zone colour to the entire attributed status title. The Z1 default is `#888888`; against a translucent menu bar it has insufficient contrast. | Keep the BPM text system-primary/white. Show zone with a small coloured dot or templated status icon, so colour is a supplementary cue. |
-| Dashboard repeats BPM | The top-left hero label and the donut's centre label both render `62` in `popover.py`. | Keep the large hero BPM as the sole numeric reading. The donut becomes a zone/progress dial with ticks and an accessible zone label but no duplicated centre number. |
+| Dashboard repeats BPM | The top-left hero label and the donut's centre label both render `62` in `popover.py`. | Keep exactly one BPM reading — drawn inside the dial as the sole numeric value. The dial adds zone ticks and an accessible zone label; no separate hero label. |
 | Popover is cramped and visually flat | A 280 × 620 fixed canvas combines a 36 pt hero, 110 pt gauge, 260 × 170 scaled graph, statistics, four bars, and four footer actions. The graph source is 450 × 220 and is squeezed into this canvas. | Move to a 336–360 pt dashboard with an 8 pt spacing grid, card sections, and a 16:9 graph. Avoid scaling an image to an unrelated aspect ratio. |
 | Footer controls read as one cluster | Controls are placed with independent absolute frames. The first row and Save/Quit row have inconsistent action hierarchy and little visual breathing room. | Use a full-width primary session control, a separate secondary row for export and settings, and a destructive Quit action in a lower utility area or application menu. Minimum 8 pt gaps and 36–40 pt hit targets. |
 | Settings alignment is inconsistent | The panel uses a sequence of manually decremented `y` coordinates; labels and values change columns between groups. Raw hex text fields are the only colour affordance. | Rebuild as grouped, two-column form sections with shared label/value columns. Replace colour strings as the main control with native `NSColorWell` controls plus editable hex values. |
@@ -69,9 +69,10 @@ the required Apple distribution evidence.
 
 - Define semantic tokens in one UI module: canvas, surface, primary/secondary
   text, divider, focus, success, warning, danger, and the four zone accents.
-- Use warm near-black surfaces in the dashboard and native adaptive colours in
-  settings. Do not hard-code white/grey text where AppKit semantic colours are
-  appropriate.
+- Use vibrant light surfaces in the dashboard (white canvas, light neutrals,
+  near-black primary text, saturated zone accents) and native adaptive colours
+  in settings. Do not hard-code white/grey text where AppKit semantic colours
+  are appropriate.
 - Use a compact type scale: 12 caption, 14 label, 18 section value, 42–48 BPM
   hero; prefer tabular/monospaced digits for live values if supported by the
   selected system font.
@@ -94,8 +95,8 @@ the required Apple distribution evidence.
 #### Dashboard information architecture
 
 1. **Header:** connection dot, device name/status, and a gear button.
-2. **Hero card:** one large BPM value, `BPM` unit, zone name, and a dial with
-   zone ticks but no number in its centre.
+2. **Hero card:** one live BPM reading (drawn inside the dial as the sole
+   numeric value), zone name, and a dial with zone ticks.
 3. **Trend card:** short labelled range selector (5 / 10 / 30 min), readable
    16:9 graph, and a legend only where it adds meaning.
 4. **Session card:** elapsed time as the lead metric; average and maximum as
@@ -245,14 +246,13 @@ a typical workout without manually managing files mid-flow.
   UI test or a named manual test step.
 - `make check` and a clean `make package` pass before merge.
 
-## Open product decisions
+## Resolved product decisions
 
-1. Should v1.x remain a menu-bar-only utility, or should a compact main window
-   become available for reviewing the current/recent session? ( STILL REMAIN MENU BAR UTILITY )
-2. Should zone boundaries remain a four-zone model, or should the roadmap allow
-   a five-zone model with migration of existing configuration? LETS scrap this 5 zone model for now completely
-3. Are audio zone alerts desirable during workouts, and what should the default
-   be so the app remains unobtrusive?( this will not be used during workouts , juist to monitor HRM , so we can ignore this
-4. What is the supported macOS floor after v1, and which physical straps should
-   form the permanent hardware test matrix?
- ( Lets ignore this question as well )
+1. **Stays a menu-bar-only utility.** No compact main window in v1.x; the
+   dashboard popover remains the only full interface.
+2. **Four-zone model only.** The five-zone model is explicitly out of scope;
+   no migration path is needed.
+3. **No audio zone alerts.** The app is a heart-rate monitor, not a workout
+   coach; alerts are not planned.
+4. **Open:** the supported macOS floor after v1 and the permanent hardware
+   test-matrix straps are still under engineering review.
