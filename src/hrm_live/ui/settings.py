@@ -36,7 +36,6 @@ from AppKit import (
     NSTextField,
     NSView,
     NSWindowStyleMaskClosable,
-    NSWindowStyleMaskNonactivatingPanel,
     NSWindowStyleMaskTitled,
 )
 
@@ -46,6 +45,7 @@ from hrm_live.ui.tokens import (
     INLINE_GAP,
     OUTER_PADDING,
     TEXT_SECONDARY,
+    TEXT_TERTIARY,
 )
 from hrm_live.zones import DEFAULT_COLORS, ZONE_ORDER, validate_zones
 
@@ -56,6 +56,12 @@ PANEL_HEIGHT = 680
 LABEL_COLUMN_WIDTH = 130
 VALUE_COLUMN_X = 150
 SECTION_GAP_SETTINGS = 20
+
+# Settings is a real utility window opened from a transient popover.  It must
+# be activatable after the popover closes; a non-activating panel can be
+# ordered in front and still remain invisible when the menu-bar app is not
+# active.
+SETTINGS_PANEL_STYLE_MASK = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
 
 
 class SettingsWindow:
@@ -90,13 +96,18 @@ class SettingsWindow:
     def show(self) -> None:
         """Open the settings window."""
         if self._panel and self._panel.isVisible():
-            self._panel.orderFront_(None)
+            NSApp.activateIgnoringOtherApps_(True)
+            self._panel.makeKeyAndOrderFront_(None)
+            self._panel.orderFrontRegardless()
             return
 
         self._build_panel()
         self.refresh_from_state(force=True)
         assert self._panel is not None
+        NSApp.activateIgnoringOtherApps_(True)
         self._panel.makeKeyAndOrderFront_(None)
+        self._panel.orderFrontRegardless()
+        log.debug("Settings window presented: visible=%s", self._panel.isVisible())
 
     def close(self) -> None:
         """Close the settings window."""
@@ -135,14 +146,15 @@ class SettingsWindow:
         # Main window
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             ((0, 0), (PANEL_WIDTH, PANEL_HEIGHT)),
-            NSWindowStyleMaskTitled
-            | NSWindowStyleMaskClosable
-            | NSWindowStyleMaskNonactivatingPanel,
+            SETTINGS_PANEL_STYLE_MASK,
             2,
             False,
         )
         panel.setTitle_("HRM Settings")
         panel.setFloatingPanel_(True)
+        panel.setHidesOnDeactivate_(False)
+        panel.setBecomesKeyOnlyIfNeeded_(False)
+        panel.setReleasedWhenClosed_(False)
         panel.setFrameAutosaveName_("HRMSettingsPanel")
         panel.center()
 
@@ -199,14 +211,14 @@ class SettingsWindow:
         content.addSubview_(picker_label)
 
         popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            ((VALUE_COLUMN_X, y - 26, 200, 26)), False
+            _rect((VALUE_COLUMN_X, y - 26, 200, 26)), False
         )
         popup.setTarget_(self)
         popup.setAction_("scan_result_selected:")
         content.addSubview_(popup)
         self._controls["scan_results"] = popup
 
-        use_btn = NSButton.alloc().initWithFrame_((VALUE_COLUMN_X + 210, y - 26, 110, 26))
+        use_btn = NSButton.alloc().initWithFrame_(_rect((VALUE_COLUMN_X + 210, y - 26, 110, 26)))
         use_btn.setBezelStyle_(NSBezelStyleRounded)
         use_btn.setTitle_("Use Device")
         use_btn.setTarget_(self)
@@ -281,6 +293,7 @@ class SettingsWindow:
         # Set content height
         content.setFrameSize_((PANEL_WIDTH - 20, y + OUTER_PADDING))
         self._panel = panel
+        log.debug("Settings panel built: frame=%s", panel.frame())
 
     def _add_section_header(self, parent: NSView, y: float, title: str) -> float:
         """Add a section header label and separator line."""
@@ -817,7 +830,7 @@ class SettingsWindow:
             b = int(rgb.blueComponent() * 255)
             return f"#{r:02X}{g:02X}{b:02X}"
         except Exception:
-            return "#888888"
+            return TEXT_TERTIARY
 
     def _set_text(self, key: str, value: str) -> None:
         control = self._controls.get(key)

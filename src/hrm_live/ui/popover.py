@@ -36,9 +36,8 @@ from AppKit import (
     NSModalResponseOK,
     NSPopover,
     NSPopoverBehaviorTransient,
+    NSRectEdgeMinY,
     NSSavePanel,
-    NSSegmentedControl,
-    NSSegmentSwitchTrackingSelectOne,
     NSTextField,
     NSView,
     NSViewController,
@@ -49,26 +48,25 @@ from Foundation import NSURL, NSString
 import hrm_live.config as cfg_mod
 import hrm_live.session as sess_mod
 from hrm_live.state import AppState, ExportSnapshot, UISnapshot
-from hrm_live.ui.graph import render_graph
+from hrm_live.ui.graph import render_graph, summarize_heart_rate
 from hrm_live.ui.tokens import (
     CANVAS,
     CARD_PADDING,
     DIVIDER,
     GAUGE_LINE_WIDTH,
-    GAUGE_SIZE,
     GRAPH_HEIGHT,
-    HERO_BPM,
     INLINE_GAP,
     LABEL,
     OUTER_PADDING,
     SECTION_GAP,
     SECTION_GAP_LARGE,
-    SECTION_VALUE,
     STATUS_CONNECTED,
     STATUS_DISCONNECTED,
     STATUS_ERROR,
     STATUS_RECONNECTING,
     SURFACE,
+    SURFACE_ALT,
+    TEXT_ACCENT,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
     TEXT_TERTIARY,
@@ -79,9 +77,12 @@ from hrm_live.zones import ZONE_ORDER, get_zone, zone_label
 log = logging.getLogger(__name__)
 
 POPOVER_WIDTH = 344
-GAUGE_LABEL_FONT_SIZE = 12
-HERO_FONT_SIZE = 48
 RECENT_SESSION_ROWS = 4
+HERO_GAUGE_SIZE = 164
+TREND_HEADER_HEIGHT = 48
+# Keep the popover vertically anchored to the status-item button.  Passing
+# ``0`` here means ``NSRectEdgeMinX`` and places the popover to the left.
+POPOVER_PREFERRED_EDGE = NSRectEdgeMinY
 
 
 class HRMPopover:
@@ -110,7 +111,9 @@ class HRMPopover:
         self._gauge_view: DonutGaugeView | None = None
         self._graph_image_view: NSImageView | None = None
         self._graph_placeholder: NSTextField | None = None
-        self._trend_selector: NSSegmentedControl | None = None
+        self._graph_average_value: NSTextField | None = None
+        self._graph_range_value: NSTextField | None = None
+        self._trend_buttons: list[NSButton] = []
         self._session_stats_label: NSTextField | None = None
         self._zone_bar_container: NSView | None = None
         self._session_button: NSButton | None = None
@@ -154,7 +157,7 @@ class HRMPopover:
         self._popover.showRelativeToRect_ofView_preferredEdge_(
             sender.bounds(),
             sender,
-            0,  # NSRectEdgeMinY
+            POPOVER_PREFERRED_EDGE,
         )
 
     def refresh(self) -> None:
@@ -205,8 +208,11 @@ class HRMPopover:
 
         # ── Trend card: graph ───────────────────────────────────────
         self._update_graph(s, max_hr, zones_cfg, colors_cfg)
-        if self._trend_selector:
-            self._trend_selector.setSelectedSegment_(self._trend_segment_for_minutes(s.config))
+        selected_segment = self._trend_segment_for_minutes(s.config)
+        for idx, button in enumerate(self._trend_buttons):
+            _set_dashboard_button_style(
+                button, "selected" if idx == selected_segment else "secondary"
+            )
 
         # ── Session card ────────────────────────────────────────────
         self._update_session(s, colors_cfg)
@@ -219,17 +225,28 @@ class HRMPopover:
 
     def _calculate_height(self) -> float:
         """Estimate the total popover height based on content sections."""
-        # Header: ~24pt
-        h = OUTER_PADDING + 24 + INLINE_GAP
-        # Hero card: gauge (110) + label space
-        h += HERO_BPM + 8 + GAUGE_SIZE + SECTION_GAP
-        # Trend card: graph + selector
-        h += GRAPH_HEIGHT + 30 + SECTION_GAP
-        # Session card: stats + zone bars
-        h += 60 + 100 + SECTION_GAP
-        # Action area + recent sessions archive
-        h += 80 + 128 + SECTION_GAP
-        return max(h, 520)
+        # Keep this in sync with the fixed-frame sections below.  The old
+        # estimate was too short, which clipped controls at the bottom.
+        header_h = 36 + SECTION_GAP
+        hero_h = HERO_GAUGE_SIZE + 26 + CARD_PADDING * 2 + INLINE_GAP + SECTION_GAP_LARGE
+        trend_h = (
+            TREND_HEADER_HEIGHT + INLINE_GAP + 34 + INLINE_GAP + GRAPH_HEIGHT + CARD_PADDING * 2
+        )
+        trend_h += INLINE_GAP + SECTION_GAP_LARGE
+        session_h = 24 + INLINE_GAP + 42 + INLINE_GAP + 96 + CARD_PADDING * 2
+        session_h += INLINE_GAP + SECTION_GAP
+        action_h = 12 + 40 + INLINE_GAP + 36 + SECTION_GAP
+        recent_h = 24 + INLINE_GAP + 22 + CARD_PADDING * 2
+        return (
+            OUTER_PADDING
+            + header_h
+            + hero_h
+            + trend_h
+            + session_h
+            + action_h
+            + recent_h
+            + OUTER_PADDING
+        )
 
     def _build_view(self) -> NSView:
         """Build the persistent view hierarchy (called once)."""
@@ -324,15 +341,15 @@ class HRMPopover:
         root.addSubview_(dev_label)
         self._header_device_label = dev_label
 
-        # Gear / settings button
-        gear_btn = NSButton.alloc().initWithFrame_(
-            ((POPOVER_WIDTH - OUTER_PADDING - 32, y - 28), (28, 28))
+        # A labelled control is easier to discover than the old icon-only
+        # 28 pt gear against the dashboard surface.
+        gear_btn = _make_dashboard_button(
+            ((POPOVER_WIDTH - OUTER_PADDING - 96, y - 32), (96, 32)),
+            "⚙  Settings",
+            "secondary",
         )
-        gear_btn.setBezelStyle_(NSBezelStyleRounded)
-        gear_btn.setTitle_("⚙")
         gear_btn.setTarget_(self)
         gear_btn.setAction_("open_settings:")
-        _set_dark_button_title(gear_btn, "Settings")
         root.addSubview_(gear_btn)
 
         return y - 36
@@ -376,10 +393,11 @@ class HRMPopover:
         zone_bounds: dict,
         max_hr: int,
     ) -> float:
-        """Build the hero card: large BPM + gaug + zone label."""
+        """Build the hero card: one centered heart-rate gauge and zone label."""
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
-        card_h = HERO_BPM + 8 + GAUGE_SIZE + CARD_PADDING * 2
+        zone_label_h = 22
+        card_h = HERO_GAUGE_SIZE + zone_label_h + CARD_PADDING * 2 + 4
 
         # Card background
         card = ColoredRectView.alloc().initWithFrame_(((x, y - card_h), (card_w, card_h)))
@@ -387,31 +405,22 @@ class HRMPopover:
         card.setCornerRadius_(8)
         root.addSubview_(card)
 
-        cy = y - CARD_PADDING
-
-        # Hero BPM
         bpm_val = s.latest_bpm if s.connected and s.latest_bpm is not None else None
-        bpm_str = f"{bpm_val}" if bpm_val is not None else "---"
         accent = zone_accent(zone, colors_cfg) if bpm_val is not None else TEXT_TERTIARY
-        hero = _make_label(
-            bpm_str,
-            NSFont.monospacedDigitSystemFontOfSize_weight_(HERO_BPM, 0),
-            _ns_color(accent),
-            (x + CARD_PADDING, cy - HERO_BPM, 180, HERO_BPM),
-        )
-        root.addSubview_(hero)
-        self._hero_label = hero
 
-        # BPM unit label next to hero
-        unit = _make_label(
-            "BPM",
-            NSFont.systemFontOfSize_(LABEL),
-            _ns_color(TEXT_TERTIARY),
-            (x + CARD_PADDING + 140, cy - HERO_BPM + 8, 50, 20),
+        # The gauge is the single centered live-heart-rate reading.
+        gauge_x = x + (card_w - HERO_GAUGE_SIZE) / 2
+        gauge_y = y - CARD_PADDING - HERO_GAUGE_SIZE
+        gauge_frame = ((gauge_x, gauge_y), (HERO_GAUGE_SIZE, HERO_GAUGE_SIZE))
+        gauge_view = DonutGaugeView.alloc().initWithFrame_(gauge_frame)
+        gauge_view.setBpm_zone_zoneBounds_maxHr_colorsCfg_(
+            bpm_val, zone, zone_bounds, max_hr, colors_cfg
         )
-        root.addSubview_(unit)
+        root.addSubview_(gauge_view)
+        self._gauge_view = gauge_view
 
-        # Zone name
+        # Zone sits directly below the gauge, rather than duplicating it in
+        # the dial itself.
         if bpm_val is not None:
             zl = zone_label(zone)
             zone_str = f"{zone} — {zl}"
@@ -421,21 +430,12 @@ class HRMPopover:
             zone_str,
             NSFont.systemFontOfSize_(LABEL),
             _ns_color(accent if bpm_val is not None else TEXT_TERTIARY),
-            (x + CARD_PADDING, cy - HERO_BPM - 20, 200, 20),
+            (x + CARD_PADDING, gauge_y - zone_label_h, card_w - 2 * CARD_PADDING, zone_label_h),
         )
+        zlbl.setAlignment_(2)  # NSTextAlignmentCenter
         root.addSubview_(zlbl)
         self._zone_label = zlbl
-
-        # Donut gauge (right side, no centre number)
-        gauge_x = POPOVER_WIDTH - OUTER_PADDING - CARD_PADDING - GAUGE_SIZE
-        gauge_y = cy - GAUGE_SIZE - CARD_PADDING
-        gauge_frame = ((gauge_x, gauge_y), (GAUGE_SIZE, GAUGE_SIZE))
-        gauge_view = DonutGaugeView.alloc().initWithFrame_(gauge_frame)
-        gauge_view.setBpm_zone_zoneBounds_maxHr_colorsCfg_(
-            bpm_val, zone, zone_bounds, max_hr, colors_cfg
-        )
-        root.addSubview_(gauge_view)
-        self._gauge_view = gauge_view
+        self._hero_label = None
 
         return y - card_h - INLINE_GAP
 
@@ -453,8 +453,8 @@ class HRMPopover:
         """Build the trend card: range selector + graph."""
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
-        header_h = 24
-        selector_h = 22
+        header_h = TREND_HEADER_HEIGHT
+        selector_h = 34
         gap = INLINE_GAP
         card_h = header_h + gap + selector_h + gap + GRAPH_HEIGHT + CARD_PADDING * 2
 
@@ -465,31 +465,75 @@ class HRMPopover:
 
         cy = y - CARD_PADDING
 
-        # Section header
+        # Section header and the two glanceable values used by the tracker.
         trend_header = _make_label(
             "Heart Rate",
-            NSFont.systemFontOfSize_(LABEL),
+            NSFont.systemFontOfSize_weight_(16, 0.4),
             _ns_color(TEXT_PRIMARY),
-            (x + CARD_PADDING, cy - header_h, 120, header_h),
+            (x + CARD_PADDING, cy - 30, 92, 24),
         )
         root.addSubview_(trend_header)
 
+        summary_x = x + CARD_PADDING + 96
+        summary_right = x + card_w - CARD_PADDING
+        average_caption = _make_label(
+            "AVERAGE",
+            NSFont.systemFontOfSize_(10),
+            _ns_color(TEXT_SECONDARY),
+            (summary_x, cy - 16, 78, 12),
+        )
+        average_caption.setAlignment_(2)
+        root.addSubview_(average_caption)
+        average_value = _make_label(
+            "—",
+            NSFont.monospacedDigitSystemFontOfSize_weight_(16, 0.4),
+            _ns_color(TEXT_ACCENT),
+            (summary_x, cy - 40, 78, 20),
+        )
+        average_value.setAlignment_(2)
+        root.addSubview_(average_value)
+        self._graph_average_value = average_value
+
+        range_x = summary_x + 86
+        range_caption = _make_label(
+            "RANGE",
+            NSFont.systemFontOfSize_(10),
+            _ns_color(TEXT_SECONDARY),
+            (range_x, cy - 16, summary_right - range_x, 12),
+        )
+        range_caption.setAlignment_(2)
+        root.addSubview_(range_caption)
+        range_value = _make_label(
+            "—",
+            NSFont.monospacedDigitSystemFontOfSize_weight_(16, 0.4),
+            _ns_color(TEXT_PRIMARY),
+            (range_x, cy - 40, summary_right - range_x, 20),
+        )
+        range_value.setAlignment_(2)
+        root.addSubview_(range_value)
+        self._graph_range_value = range_value
+
         cy -= header_h + gap
 
-        # Range selector (5 / 10 / 30 min)
-        selector = NSSegmentedControl.alloc().initWithFrame_(
-            ((x + CARD_PADDING, cy - selector_h), (200, selector_h))
-        )
-        selector.setSegmentCount_(3)
-        selector.setLabel_forSegment_("5 min", 0)
-        selector.setLabel_forSegment_("10 min", 1)
-        selector.setLabel_forSegment_("30 min", 2)
-        selector.setTrackingMode_(NSSegmentSwitchTrackingSelectOne)
-        selector.setTarget_(self)
-        selector.setAction_("trend_range_changed:")
-        selector.setSelectedSegment_(self._trend_segment_for_minutes(s.config))
-        root.addSubview_(selector)
-        self._trend_selector = selector
+        # Explicit buttons retain their contrast on the light surface; native
+        # segmented controls were rendering as unreadable black capsules.
+        selected = self._trend_segment_for_minutes(s.config)
+        selector_w = (card_w - 2 * CARD_PADDING - 2 * INLINE_GAP) / 3
+        self._trend_buttons = []
+        for idx, title in enumerate(("5 min", "10 min", "30 min")):
+            button = _make_dashboard_button(
+                (
+                    (x + CARD_PADDING + idx * (selector_w + INLINE_GAP), cy - selector_h),
+                    (selector_w, selector_h),
+                ),
+                title,
+                "selected" if idx == selected else "secondary",
+            )
+            button.setTag_(idx)
+            button.setTarget_(self)
+            button.setAction_("trend_range_changed:")
+            root.addSubview_(button)
+            self._trend_buttons.append(button)
 
         graph_y = cy - selector_h - gap - GRAPH_HEIGHT
 
@@ -529,7 +573,7 @@ class HRMPopover:
     def trend_range_changed_(self, sender: Any) -> None:
         """Handle graph time range selection."""
         segments = {0: 5, 1: 10, 2: 30}
-        minutes = segments.get(sender.selectedSegment(), 10)
+        minutes = segments.get(sender.tag(), 10)
         cfg = deepcopy(self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG)
         if cfg.get("graph_window_minutes") != minutes:
             cfg["graph_window_minutes"] = minutes
@@ -552,6 +596,7 @@ class HRMPopover:
             return
 
         window_minutes = (s.config or {}).get("graph_window_minutes", 10)
+        self._update_graph_summary(s, window_minutes)
 
         if s.ring_buffer:
             key = (
@@ -587,6 +632,22 @@ class HRMPopover:
         self._graph_placeholder.setStringValue_(_empty_graph_placeholder(s))
         self._graph_placeholder.setHidden_(False)
 
+    def _update_graph_summary(self, s: UISnapshot, window_minutes: int) -> None:
+        """Keep the tracker summary aligned with the visible graph window."""
+        summary = summarize_heart_rate(s.ring_buffer, window_minutes)
+        if summary is None:
+            average_text = "—"
+            range_text = "—"
+        else:
+            average, minimum, maximum = summary
+            average_text = f"{average:.0f} bpm"
+            range_text = f"{minimum}–{maximum} bpm"
+
+        if self._graph_average_value:
+            self._graph_average_value.setStringValue_(average_text)
+        if self._graph_range_value:
+            self._graph_range_value.setStringValue_(range_text)
+
     # ── Session Card ────────────────────────────────────────────────────
 
     def _build_session_card(
@@ -600,8 +661,8 @@ class HRMPopover:
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
         header_h = 24
-        stats_h = 20
-        bar_area_h = 80
+        stats_h = 42
+        bar_area_h = 96
         card_h = header_h + INLINE_GAP + stats_h + INLINE_GAP + bar_area_h + CARD_PADDING * 2
 
         card = ColoredRectView.alloc().initWithFrame_(((x, y - card_h), (card_w, card_h)))
@@ -622,8 +683,9 @@ class HRMPopover:
 
         cy -= header_h + INLINE_GAP
 
-        # Stats line: elapsed | avg | max
-        stats_font = NSFont.monospacedDigitSystemFontOfSize_weight_(SECTION_VALUE, 0)
+        # Two short stat lines are readable at a glance.  The previous single
+        # 18 pt line overflowed the card once all four values were populated.
+        stats_font = NSFont.monospacedDigitSystemFontOfSize_weight_(14, 0)
         stats_str = self._session_stats_string(s)
         stats_lbl = _make_label(
             stats_str,
@@ -659,7 +721,7 @@ class HRMPopover:
         avg = s.session_sum / s.session_count if s.session_count > 0 else 0
         mx = s.session_max if s.session_count > 0 else 0
         mn = s.session_min if s.session_count > 0 and s.session_min < 999 else 0
-        return f"{elapsed}  |  Avg {avg:.0f}  |  Max {mx}  |  Min {mn}"
+        return f"Elapsed {elapsed}   Avg {avg:.0f} bpm\nMax {mx} bpm      Min {mn} bpm"
 
     def _rebuild_zone_bars(self, s: UISnapshot, colors_cfg: dict) -> None:
         container = self._zone_bar_container
@@ -671,24 +733,36 @@ class HRMPopover:
 
         bar_area_w = container.frame().size.width
         total = sum(s.zone_times.values()) or 1
-        row_height = 18
+        row_height = 24
         for idx, zone in enumerate(ZONE_ORDER):
             row_y = idx * row_height
             seconds = s.zone_times.get(zone, 0)
-            bar_str = f"{zone}  {_format_td_short(seconds)}"
-            lbl = _make_label(
-                bar_str,
-                NSFont.systemFontOfSize_(10),
-                _ns_color(TEXT_SECONDARY),
-                (0, row_y, 80, 16),
+            zone_label_view = _make_label(
+                zone,
+                NSFont.monospacedDigitSystemFontOfSize_weight_(12, 0.4),
+                _ns_color(zone_accent(zone, colors_cfg)),
+                (0, row_y + 3, 28, 18),
             )
-            container.addSubview_(lbl)
+            container.addSubview_(zone_label_view)
+            time_label = _make_label(
+                _format_td_short(seconds),
+                NSFont.monospacedDigitSystemFontOfSize_weight_(12, 0),
+                _ns_color(TEXT_PRIMARY),
+                (bar_area_w - 64, row_y + 3, 64, 18),
+            )
+            container.addSubview_(time_label)
 
+            bar_x = 34
+            bar_max_w = bar_area_w - bar_x - 72
+            track = ColoredRectView.alloc().initWithFrame_(((bar_x, row_y + 5), (bar_max_w, 14)))
+            track.setColor_(_ns_color(SURFACE_ALT))
+            track.setCornerRadius_(7)
+            container.addSubview_(track)
             frac = seconds / total
-            bar_w = max(int(frac * (bar_area_w - 90)), 4)
-            bar = ColoredRectView.alloc().initWithFrame_(((85, row_y + 2), (bar_w, 12)))
+            bar_w = max(int(frac * bar_max_w), 4)
+            bar = ColoredRectView.alloc().initWithFrame_(((bar_x, row_y + 5), (bar_w, 14)))
             bar.setColor_(_ns_color(zone_accent(zone, colors_cfg)))
-            bar.setCornerRadius_(2)
+            bar.setCornerRadius_(7)
             container.addSubview_(bar)
 
     # ── Action Area ─────────────────────────────────────────────────────
@@ -709,18 +783,16 @@ class HRMPopover:
         root.addSubview_(sep)
         y -= 12
 
-        # Primary session button (full width)
-        btn_title = "■ Stop & Save" if s.session_active else "▶ Start Session"
-        primary_btn = NSButton.alloc().initWithFrame_(((x, y - 36), (card_w, 36)))
-        primary_btn.setBezelStyle_(NSBezelStyleRounded)
+        # Primary session action is visually distinct from export options.
+        btn_title = "■ Stop & Save" if s.session_active else "▶ Start Recording"
+        primary_btn = _make_dashboard_button(((x, y - 40), (card_w, 40)), btn_title, "primary")
         primary_btn.setTarget_(self)
         primary_btn.setAction_("start_session:" if not s.session_active else "stop_session:")
-        _set_dark_button_title(primary_btn, btn_title)
         root.addSubview_(primary_btn)
         self._session_button = primary_btn
-        y -= 42
+        y -= 48
 
-        export_container_h = 56
+        export_container_h = 36
         export_container = NSView.alloc().initWithFrame_(
             ((x, y - export_container_h), (card_w, export_container_h))
         )
@@ -728,13 +800,14 @@ class HRMPopover:
         self._export_controls_container = export_container
         self._rebuild_export_controls(s)
 
-        return y - export_container_h - 8
+        return y - export_container_h
 
     def _update_actions(self, s: UISnapshot) -> None:
         """Update action button titles and visibility."""
         if self._session_button:
-            title = "■ Stop & Save" if s.session_active else "▶ Start Session"
+            title = "■ Stop & Save" if s.session_active else "▶ Start Recording"
             self._session_button.setTitle_(title)
+            _set_dashboard_button_style(self._session_button, "primary")
             action = "stop_session:" if s.session_active else "start_session:"
             self._session_button.setAction_(action)
         self._rebuild_export_controls(s)
@@ -749,19 +822,15 @@ class HRMPopover:
 
         show_retry, export_message, export_is_error = _export_feedback(s)
         if show_retry:
-            save_btn = NSButton.alloc().initWithFrame_(((0, 24), (140, 30)))
-            save_btn.setBezelStyle_(NSBezelStyleRounded)
+            save_btn = _make_dashboard_button(((0, 0), (140, 36)), "Save CSV", "secondary")
             save_btn.setTarget_(self)
             save_btn.setAction_("save_last_session:")
-            _set_dark_button_title(save_btn, "💾 Save CSV")
             container.addSubview_(save_btn)
             self._save_button = save_btn
 
-            json_btn = NSButton.alloc().initWithFrame_(((148, 24), (140, 30)))
-            json_btn.setBezelStyle_(NSBezelStyleRounded)
+            json_btn = _make_dashboard_button(((148, 0), (140, 36)), "Save JSON", "secondary")
             json_btn.setTarget_(self)
             json_btn.setAction_("save_last_session_json:")
-            _set_dark_button_title(json_btn, "📊 Save JSON")
             container.addSubview_(json_btn)
             self._json_save_button = json_btn
             self._controls["json_save_button"] = json_btn
@@ -944,6 +1013,8 @@ class HRMPopover:
     def open_settings_(self, sender: Any) -> None:
         """Open the settings window."""
         try:
+            if self._popover:
+                self._popover.performClose_(sender)
             if self.on_settings:
                 self.on_settings()
         except Exception:
@@ -1021,11 +1092,7 @@ class HRMPopover:
 
 
 class DonutGaugeView(NSView):
-    """An NSView subclass that draws a donut/arc gauge showing HR zone.
-
-    No centre BPM number — the hero label is the sole numeric reading.
-    Shows zone ticks and coloured arc only.
-    """
+    """An NSView subclass that draws the centered live heart-rate gauge."""
 
     def initWithFrame_(self, frame: tuple) -> DonutGaugeView:
         self = objc.super(DonutGaugeView, self).initWithFrame_(frame)
@@ -1069,10 +1136,7 @@ class DonutGaugeView(NSView):
             ctx.restoreGraphicsState()
 
     def _draw_gauge(self) -> None:
-        """Render the gauge: background ring, active arc, zone ticks.
-
-        No centre BPM number — that belongs in the hero label.
-        """
+        """Render the gauge ring, active arc, zone ticks, and live BPM."""
         import math as m
 
         bounds = self.bounds()
@@ -1086,7 +1150,7 @@ class DonutGaugeView(NSView):
             (cx, cy), radius, 0, 360, False
         )
         bg_path.setLineWidth_(GAUGE_LINE_WIDTH - 2)
-        _ns_color("#333333").setStroke()
+        _ns_color(SURFACE_ALT).setStroke()
         bg_path.stroke()
 
         # Active arc
@@ -1121,13 +1185,13 @@ class DonutGaugeView(NSView):
                         (cx + tick_outer_r * m.cos(rad), cy + tick_outer_r * m.sin(rad))
                     )
                     tick_path.setLineWidth_(1.5)
-                    _ns_color("#666666").setStroke()
+                    _ns_color(DIVIDER).setStroke()
                     tick_path.stroke()
 
-            # Zone label at bottom of gauge
-            label = zone_label(self._zone)
-            font = NSFont.systemFontOfSize_(GAUGE_LABEL_FONT_SIZE)
-            col = _ns_color(zone_accent(self._zone, self._colors_cfg))
+            # One legible numeric reading lives inside the dial.
+            label = str(self._bpm)
+            font = NSFont.monospacedDigitSystemFontOfSize_weight_(38, 0.2)
+            col = _ns_color(TEXT_PRIMARY)
             attrs = {
                 NSFontAttributeName: font,
                 NSForegroundColorAttributeName: col,
@@ -1135,10 +1199,8 @@ class DonutGaugeView(NSView):
             ns_str = NSString.alloc().initWithString_(label)
             size = ns_str.sizeWithAttributes_(attrs)
             x = cx - size.width / 2
-            y = cy - size.height / 2 - radius + GAUGE_LINE_WIDTH + 8
+            y = cy - size.height / 2
             ns_str.drawAtPoint_withAttributes_((x, y), attrs)
-
-        # No centre BPM number — hero label is the sole numeric reading.
 
 
 class ColoredRectView(NSView):
@@ -1213,6 +1275,45 @@ def _make_label(text: str, font: NSFont, color: NSColor, frame: tuple) -> NSText
     return f
 
 
+_DASHBOARD_BUTTON_COLORS = {
+    "primary": (TEXT_ACCENT, "#FFFFFF", TEXT_ACCENT),
+    "selected": ("#D9ECFF", TEXT_PRIMARY, TEXT_ACCENT),
+    "secondary": (SURFACE_ALT, TEXT_PRIMARY, DIVIDER),
+}
+
+
+def _set_dashboard_button_style(button: NSButton, style: str) -> None:
+    """Apply a persistent contrast-safe style to an existing button."""
+    fill_hex, text_hex, border_hex = _DASHBOARD_BUTTON_COLORS.get(
+        style, _DASHBOARD_BUTTON_COLORS["secondary"]
+    )
+    layer = button.layer()
+    layer.setBackgroundColor_(_ns_color(fill_hex).CGColor())
+    layer.setBorderColor_(_ns_color(border_hex).CGColor())
+    attrs = {
+        NSFontAttributeName: NSFont.systemFontOfSize_weight_(13, 0.3),
+        NSForegroundColorAttributeName: _ns_color(text_hex),
+    }
+    button.setAttributedTitle_(
+        NSAttributedString.alloc().initWithString_attributes_(button.title(), attrs)
+    )
+
+
+def _make_dashboard_button(frame: tuple, title: str, style: str) -> NSButton:
+    """Create an AppKit button with a persistent, high-contrast idle state."""
+    button = NSButton.alloc().initWithFrame_(_rect(frame))
+    button.setBezelStyle_(NSBezelStyleRounded)
+    button.setBordered_(False)
+    button.setWantsLayer_(True)
+    layer = button.layer()
+    layer.setBorderWidth_(1.0)
+    layer.setCornerRadius_(7.0)
+    button.setTitle_(title)
+    button.setAccessibilityLabel_(title)
+    _set_dashboard_button_style(button, style)
+    return button
+
+
 def _rect(frame: tuple) -> tuple:
     """Accept flat or AppKit-style rect tuples and return AppKit form."""
     if len(frame) == 2:
@@ -1236,14 +1337,8 @@ def _ns_color(hex_str: str) -> NSColor:
 
 
 def _set_dark_button_title(button: NSButton, title: str) -> None:
-    """Style a button with white text on dark background."""
-    attrs = {
-        NSForegroundColorAttributeName: NSColor.labelColor(),
-        NSFontAttributeName: NSFont.systemFontOfSize_(13),
-    }
-    attributed = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
+    """Set a native button title without overriding its contrast handling."""
     button.setTitle_(title)
-    button.setAttributedTitle_(attributed)
     button.setAccessibilityLabel_(title)
 
 

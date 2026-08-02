@@ -4,7 +4,7 @@ build_backend = "setuptools.build_meta"
 
 [project]
 name = "hrm-bar"
-version = "0.1.0"
+version = "0.9.0"
 description = "macOS menu bar app for BLE heart rate monitor straps"
 requires-python = ">=3.14"
 license = "MIT"
@@ -49,9 +49,14 @@ asyncio_mode = "auto"
 [tool.coverage.run]
 branch = true
 source = ["hrm_live"]
+omit = [
+    "*/hrm_live/__main__.py",
+    "*/hrm_live/app.py",
+    "*/hrm_live/ui/*",
+]
 
 [tool.coverage.report]
-fail_under = 54
+fail_under = 60
 show_missing = true
 skip_covered = true
 

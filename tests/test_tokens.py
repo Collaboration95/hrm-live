@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 from hrm_live.ui.tokens import (
+    CANVAS,
+    DIVIDER,
     STATUS_CONNECTED,
     STATUS_DISCONNECTED,
     STATUS_ERROR,
     STATUS_RECONNECTING,
+    SURFACE,
+    SURFACE_ALT,
     ZONE_COLORS_DEFAULT,
     menu_accessibility_label,
     menu_title,
     status_dot_colour,
     zone_accent,
 )
+
+
+def test_dashboard_uses_vibrant_light_palette() -> None:
+    assert CANVAS == "#FFFFFF"
+    assert SURFACE == "#F5F5F7"
+    assert SURFACE_ALT == "#E5E5EA"
+    assert DIVIDER == "#D1D1D6"
 
 
 class TestStatusDotColour:
@@ -50,7 +61,7 @@ class TestZoneAccent:
         assert zone_accent("Z2", cfg) == ZONE_COLORS_DEFAULT["Z2"]
 
     def test_unknown_zone_returns_fallback_grey(self) -> None:
-        assert zone_accent("Z5", None) == "#888888"
+        assert zone_accent("Z5", None) == STATUS_DISCONNECTED
 
 
 class TestMenuTitle:

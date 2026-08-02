@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from hrm_live.state import UISnapshot
-from hrm_live.ui.popover import _empty_graph_placeholder, _format_td_seconds, _format_td_short
+from hrm_live.state import AppState, UISnapshot
+from hrm_live.ui.popover import (
+    HRMPopover,
+    _empty_graph_placeholder,
+    _format_td_seconds,
+    _format_td_short,
+)
 from hrm_live.ui.settings import _is_valid_hex
 
 
@@ -46,6 +51,11 @@ class TestFormatTime:
         assert _format_td_short(90) == "01:30"
         assert _format_td_short(3600) == "01:00:00"
         assert _format_td_short(3661) == "01:01:01"
+
+
+def test_popover_height_includes_bottom_controls() -> None:
+    """The fixed-frame footer and archive must not be clipped by the popover."""
+    assert HRMPopover(AppState())._calculate_height() >= 1000
 
 
 class TestEmptyGraphPlaceholder:
