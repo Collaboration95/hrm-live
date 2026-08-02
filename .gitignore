@@ -7,7 +7,12 @@ build/
 *.egg
 .pytest_cache/
 .coverage
+.mypy_cache/
+.ruff_cache/
 *.so
+
+# Local agent working reference (do not commit)
+agents.md
 
 # Virtual environments
 .env/

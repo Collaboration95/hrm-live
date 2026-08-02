@@ -33,8 +33,8 @@ OPTIONS = {
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
         "CFBundleIdentifier": "com.hrmlive.app",
-        "CFBundleVersion": "0.1.0",
-        "CFBundleShortVersionString": "0.1.0",
+        "CFBundleVersion": "0.9.0",
+        "CFBundleShortVersionString": "0.9.0",
         "NSBluetoothAlwaysUsageDescription": (
             "HRM Live uses Bluetooth to connect to your heart rate "
             "monitor strap and display live BPM data."
@@ -118,7 +118,7 @@ def _version_plist() -> dict[str, str]:
     try:
         app_version = version(PACKAGE_NAME)
     except PackageNotFoundError:
-        app_version = "0.1.0"
+        app_version = "0.9.0"
     return {
         "CFBundleVersion": app_version,
         "CFBundleShortVersionString": app_version,

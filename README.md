@@ -112,8 +112,7 @@ With coverage:
 make coverage
 ```
 
-The current initial coverage gate is 54%, measured after adding AppKit-safe
-unit tests and before deeper UI automation.
+The current coverage gate is 60%, with the suite measuring ~76% locally (164 tests).
 
 ## Configuration
 
@@ -182,10 +181,9 @@ src/
 tests/
   ...
 docs/
-  IMPLEMENTATION_NOTES.md              # Historical coding-agent handoff evidence
-  RELEASE_CHECKLIST.md                 # Release-candidate sign-off record
-  RELEASE_IMPLEMENTATION_HANDOFF.md
-  RELEASE_READINESS_AUDIT_2026-07-15.md  # Current independent release status
+  RELEASE_CHECKLIST.md   # Release-candidate sign-off and evidence record
+  FEATURE_ROADMAP.md     # Product roadmap and feature milestones
+  ISSUE-*.md             # Plans for in-flight UI/UX issues
 ```
 
 ## Privacy And Limitations

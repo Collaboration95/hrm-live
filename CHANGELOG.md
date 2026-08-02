@@ -2,10 +2,16 @@
 
 ## Unreleased
 
-- Add a required PR issue-link section and screenshot guidance for UI changes.
-- Document the GitHub label palette, including PR size labels and the v1.6 milestone.
-- Update the README to cover JSON export and saved session history.
-- Trim roadmap/admin references that no longer belong in the feature roadmap.
+- (pending)
+
+## 0.9.0 - 2026-07-31
+
+- **First public release candidate.** Rebranded the project around the current
+  `src/hrm_live` dashboard: vibrant light color system (semantic tokens), a
+  reliably-opening settings window, a glanceable heart-rate tracker, JSON
+  export, saved session history, zone-transition tracking, and dashboard-first
+  status-item interaction.
+- Bump package/bundle version to 0.9.0.
 
 ## 0.1.0 - 2026-07-15
 
