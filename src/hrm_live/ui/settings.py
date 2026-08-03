@@ -23,12 +23,15 @@ from AppKit import (
     NSAlertFirstButtonReturn,
     NSApp,
     NSBezelStyleRounded,
+    NSBezierPath,
     NSBox,
     NSBoxSeparator,
     NSButton,
     NSColor,
     NSColorWell,
     NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
     NSNumberFormatter,
     NSObject,
     NSPanel,
@@ -41,10 +44,12 @@ from AppKit import (
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskTitled,
 )
+from Foundation import NSString
 
 import hrm_live.config as cfg_mod
 from hrm_live.state import AppState, DiscoveredDevice
 from hrm_live.ui.tokens import (
+    DIVIDER,
     INLINE_GAP,
     OUTER_PADDING,
     TEXT_SECONDARY,
@@ -59,6 +64,7 @@ PANEL_HEIGHT = 680
 LABEL_COLUMN_WIDTH = 130
 VALUE_COLUMN_X = 150
 SECTION_GAP_SETTINGS = 20
+PREVIEW_HEIGHT = 66
 
 # Settings is a real utility window opened from a transient popover.  It must
 # be activatable after the popover closes; a non-activating panel can be
@@ -88,6 +94,106 @@ class _SettingsDelegate(NSObject):
         self.owner._mark_dirty()
 
 
+class ZonePreviewView(NSView):
+    """Compact live preview of the four training zones.
+
+    Draws a horizontal zone ramp whose segment colors, boundary markers,
+    and computed BPM cutoffs track the settings form in real time, so
+    personalization is visible before it is committed.
+    """
+
+    def initWithFrame_(self, frame: tuple) -> ZonePreviewView:
+        self = objc.super(ZonePreviewView, self).initWithFrame_(frame)
+        if self is not None:
+            self._colors: dict[str, str] = dict(DEFAULT_COLORS)
+            self._zones: dict[str, float] = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
+            self._max_hr: int = 190
+        return self
+
+    def refreshWithColors_zones_maxHr_(
+        self, colors: dict[str, str], zones: dict[str, float], max_hr: int
+    ) -> None:
+        """Update the preview from current form values and redraw."""
+        self._colors = dict(colors)
+        self._zones = dict(zones)
+        self._max_hr = int(max_hr)
+        self.setNeedsDisplay_(True)
+
+    def isFlipped(self) -> bool:
+        return True  # Top-down layout keeps text drawing simple
+
+    def drawRect_(self, rect: tuple) -> None:
+        try:
+            self._draw_ramp()
+        except Exception:
+            log.exception("Failed to draw zone preview")
+
+    def _draw_ramp(self) -> None:
+        bounds = self.bounds()
+        width = bounds.size.width
+        ramp_h = 26
+        ramp_y = 18
+
+        z1 = self._zones["z1_max"]
+        z2 = self._zones["z2_max"]
+        z3 = self._zones["z3_max"]
+
+        # ── Zone ramp ────────────────────────────────────────────────
+        spans = [
+            ("Z1", 0.0, z1, self._colors["Z1"]),
+            ("Z2", z1, z2, self._colors["Z2"]),
+            ("Z3", z2, z3, self._colors["Z3"]),
+            ("Z4", z3, 1.0, self._colors["Z4"]),
+        ]
+        for label, lo, hi, hex_color in spans:
+            x0 = lo * width
+            seg_w = (hi - lo) * width
+            if seg_w <= 0:
+                continue
+            _ns_color(hex_color, 0.9).setFill()
+            NSBezierPath.fillRect_(((x0, ramp_y), (seg_w, ramp_h)))
+            _preview_draw_text(
+                label,
+                (x0 + seg_w / 2, ramp_y + ramp_h / 2),
+                font_size=11,
+                color=_preview_contrast_color(hex_color),
+                align="center",
+            )
+
+        # ── Boundary markers + percent captions ──────────────────────
+        for frac in (z1, z2, z3):
+            x = frac * width
+            if 0 < x < width:
+                tick = NSBezierPath.bezierPath()
+                tick.moveToPoint_((x, ramp_y))
+                tick.lineToPoint_((x, ramp_y + ramp_h))
+                tick.setLineWidth_(1.0)
+                _ns_color(DIVIDER).setStroke()
+                tick.stroke()
+                _preview_draw_text(
+                    f"{frac * 100:.0f}%",
+                    (x, 2),
+                    font_size=10,
+                    color=_ns_color(TEXT_SECONDARY),
+                    align="center",
+                )
+
+        # ── Computed BPM cutoffs ─────────────────────────────────────
+        z1_bpm = round(self._max_hr * z1)
+        z2_bpm = round(self._max_hr * z2)
+        z3_bpm = round(self._max_hr * z3)
+        cutoff_text = (
+            f"Z1 <{z1_bpm} · Z2 {z1_bpm}–{z2_bpm} · Z3 {z2_bpm}–{z3_bpm} · Z4 ≥{z3_bpm} bpm"
+        )
+        _preview_draw_text(
+            cutoff_text,
+            (0, ramp_y + ramp_h + 6),
+            font_size=10,
+            color=_ns_color(TEXT_SECONDARY),
+            align="left",
+        )
+
+
 class SettingsWindow:
     """Settings panel controller with grouped form and live validation."""
 
@@ -112,6 +218,7 @@ class SettingsWindow:
         self._last_state_signature: tuple[Any, ...] | None = None
         self._color_wells: dict[str, NSColorWell] = {}
         self._color_hex_fields: dict[str, NSTextField] = {}
+        self._preview_view: ZonePreviewView | None = None
         self._dirty = False
         self._delegate: _SettingsDelegate | None = None
 
@@ -289,6 +396,19 @@ class SettingsWindow:
         y = self._add_section_header(content, y, "Zones")
         y = self._add_zones_section(content, y, cfg)
         y = self._add_colors_section(content, y, cfg)
+
+        # ══════════════════════════════════════════════════════════════
+        # SECTION: Preview (live zone ramp)
+        # ══════════════════════════════════════════════════════════════
+        y = self._add_section_header(content, y, "Preview")
+        y -= INLINE_GAP
+        preview = ZonePreviewView.alloc().initWithFrame_(
+            ((OUTER_PADDING, y - PREVIEW_HEIGHT), (PANEL_WIDTH - 2 * OUTER_PADDING, PREVIEW_HEIGHT))
+        )
+        content.addSubview_(preview)
+        self._preview_view = preview
+        self._update_preview()
+        y -= PREVIEW_HEIGHT + INLINE_GAP
 
         # ══════════════════════════════════════════════════════════════
         # SECTION: Graph
@@ -522,6 +642,26 @@ class SettingsWindow:
         """Record that the form differs from the last saved configuration."""
         self._dirty = True
 
+    def _update_preview(self) -> None:
+        """Refresh the live zone ramp from the current form values."""
+        if self._preview_view is None:
+            return
+        try:
+            z1 = float(self._controls["zone_z1_max"].stringValue()) / 100.0
+            z2 = float(self._controls["zone_z2_max"].stringValue()) / 100.0
+            z3 = float(self._controls["zone_z3_max"].stringValue()) / 100.0
+            max_hr = int(self._controls["max_hr"].stringValue())
+        except ValueError, AttributeError, KeyError, TypeError:
+            return  # Keep the last valid preview while the field is being edited
+
+        colors: dict[str, str] = {}
+        for zone in ZONE_ORDER:
+            raw = self._controls[f"color_{zone}"].stringValue().strip()
+            colors[zone] = raw if _is_valid_hex(raw) else DEFAULT_COLORS[zone]
+        self._preview_view.refreshWithColors_zones_maxHr_(
+            colors, {"z1_max": z1, "z2_max": z2, "z3_max": z3}, max_hr
+        )
+
     def _window_should_close(self) -> bool:
         """Return whether the window may close, prompting on unsaved edits."""
         if not self._dirty:
@@ -579,6 +719,7 @@ class SettingsWindow:
                 if swatch:
                     swatch.setTextColor_(color)
                 break
+        self._update_preview()
 
     def hex_color_changed_(self, sender: NSTextField) -> None:
         """Sync colour well when hex field changes (on Enter)."""
@@ -596,6 +737,7 @@ class SettingsWindow:
                     if swatch:
                         swatch.setTextColor_(color)
                     break
+        self._update_preview()
 
     def zone_field_changed_(self, sender: NSTextField) -> None:
         """Inline validation of zone boundary fields."""
@@ -616,6 +758,7 @@ class SettingsWindow:
             for key in ["zone_z1_max", "zone_z2_max", "zone_z3_max"]:
                 self._validation_labels[key].setHidden_(True)
                 self._validation_labels[key].setStringValue_("")
+            self._update_preview()
 
         except ValueError, TypeError:
             # Show error on the changed field
@@ -696,6 +839,8 @@ class SettingsWindow:
             self._validation_labels[key].setHidden_(True)
             self._validation_labels[key].setStringValue_("")
 
+        self._update_preview()
+
     def close_settings_(self, sender: Any) -> None:
         """Cancel and close, prompting when the form has unsaved edits."""
         if not self._window_should_close():
@@ -730,6 +875,8 @@ class SettingsWindow:
         if seg:
             minutes = cfg.get("graph_window_minutes", 10)
             seg.setSelectedSegment_(0 if minutes <= 5 else (1 if minutes <= 10 else 2))
+
+        self._update_preview()
 
     def _sync_scan_section(self) -> None:
         self._set_text("scan_button", self._scan_button_title())
@@ -966,14 +1113,14 @@ def _rect(frame: tuple) -> tuple:
     return frame
 
 
-def _ns_color(hex_str: str) -> NSColor:
-    """Convert hex string #RRGGBB to NSColor."""
+def _ns_color(hex_str: str, alpha: float = 1.0) -> NSColor:
+    """Convert hex string #RRGGBB to NSColor (optionally with alpha)."""
     try:
         h = hex_str.lstrip("#")
         r = int(h[0:2], 16) / 255.0
         g = int(h[2:4], 16) / 255.0
         b = int(h[4:6], 16) / 255.0
-        return NSColor.colorWithRed_green_blue_alpha_(r, g, b, 1.0)
+        return NSColor.colorWithRed_green_blue_alpha_(r, g, b, alpha)
     except Exception:
         return NSColor.labelColor()
 
@@ -993,6 +1140,47 @@ def _is_valid_hex(value: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _preview_text_attributes(font_size: float, color: Any) -> dict:
+    """Attributes for zone-preview labels."""
+    return {
+        NSFontAttributeName: NSFont.systemFontOfSize_(font_size),
+        NSForegroundColorAttributeName: color,
+    }
+
+
+def _preview_contrast_color(hex_fill: str) -> Any:
+    """Return white or near-black text for a given fill color."""
+    try:
+        h = hex_fill.lstrip("#")
+        r = int(h[0:2], 16)
+        g = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        return NSColor.whiteColor() if luminance < 0.55 else NSColor.blackColor()
+    except Exception:
+        return NSColor.labelColor()
+
+
+def _preview_draw_text(
+    text: str,
+    point: tuple[float, float],
+    *,
+    font_size: float = 10,
+    color: Any = None,
+    align: str = "left",
+) -> None:
+    """Draw a string into the zone preview view, anchored at *point*."""
+    if color is None:
+        color = NSColor.labelColor()
+    attrs = _preview_text_attributes(font_size, color)
+    ns = NSString.alloc().initWithString_(text)
+    size = ns.sizeWithAttributes_(attrs)
+    x, y = point
+    if align == "center":
+        x -= size.width / 2
+    ns.drawAtPoint_withAttributes_((x, y), attrs)
 
 
 def _scan_result_label(device: DiscoveredDevice) -> str:

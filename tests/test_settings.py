@@ -100,3 +100,76 @@ def test_delegate_window_should_close_forwards() -> None:
     window = _make_window()
     delegate = _SettingsDelegate.alloc().initWithOwner_(window)
     assert delegate.windowShouldClose_(None) is True
+
+
+# ── Live zone preview ─────────────────────────────────────────────────
+
+
+class _FakeField:
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def stringValue(self) -> str:
+        return self._value
+
+    def setStringValue_(self, value: str) -> None:
+        self._value = value
+
+
+class _FakePreview:
+    def __init__(self) -> None:
+        self.data: tuple | None = None
+
+    def refreshWithColors_zones_maxHr_(self, colors: dict, zones: dict, max_hr: int) -> None:
+        self.data = (colors, zones, max_hr)
+
+
+def _window_with_controls() -> SettingsWindow:
+    window = _make_window()
+    window._controls = {
+        "max_hr": _FakeField("190"),
+        "zone_z1_max": _FakeField("60"),
+        "zone_z2_max": _FakeField("75"),
+        "zone_z3_max": _FakeField("88"),
+        "color_Z1": _FakeField("#8E8E93"),
+        "color_Z2": _FakeField("#34C759"),
+        "color_Z3": _FakeField("#FF9F0A"),
+        "color_Z4": _FakeField("#FF375F"),
+    }
+    return window
+
+
+def test_update_preview_pushes_current_values() -> None:
+    window = _window_with_controls()
+    preview = _FakePreview()
+    window._preview_view = preview  # type: ignore[assignment]
+    window._update_preview()
+    colors, zones, max_hr = preview.data  # type: ignore[misc]
+    assert zones == {"z1_max": 0.6, "z2_max": 0.75, "z3_max": 0.88}
+    assert max_hr == 190
+    assert colors["Z1"] == "#8E8E93"
+    assert colors["Z4"] == "#FF375F"
+
+
+def test_update_preview_ignores_invalid_values() -> None:
+    window = _window_with_controls()
+    preview = _FakePreview()
+    window._preview_view = preview  # type: ignore[assignment]
+    window._controls["max_hr"].setStringValue_("abc")
+    window._update_preview()
+    assert preview.data is None
+
+
+def test_update_preview_falls_back_for_invalid_hex() -> None:
+    window = _window_with_controls()
+    preview = _FakePreview()
+    window._preview_view = preview  # type: ignore[assignment]
+    window._controls["color_Z2"].setStringValue_("not-a-hex")
+    window._update_preview()
+    colors, _, _ = preview.data  # type: ignore[misc]
+    assert colors["Z2"] == "#34C759"  # default used for an invalid hex
+
+
+def test_update_preview_without_view_is_safe() -> None:
+    window = _window_with_controls()
+    window._update_preview()  # _preview_view is None -> no crash
