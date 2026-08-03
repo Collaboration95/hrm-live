@@ -2,7 +2,15 @@
 
 ## Unreleased
 
-- (pending)
+- Replace the matplotlib chart renderer with an offscreen AppKit renderer;
+  the packaged app shrinks from ~122 MB to ~28 MB with no bundled numpy.
+- Prompt before discarding unsaved settings changes; Reset to Defaults now
+  asks for confirmation before overwriting the form.
+- Add a live zone-ramp preview to the Settings Zones section that updates as
+  colors, boundaries, and max HR are edited.
+- Remove stale docs (v1.5 sprint tracker, duplicate roadmap draft, shipped
+  issue plans) and align release copy (checklist evidence, README, roadmap
+  decisions, CONTRIBUTING Python version).
 
 ## 0.9.0 - 2026-07-31
 
