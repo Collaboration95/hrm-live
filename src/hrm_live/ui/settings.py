@@ -17,8 +17,10 @@ import logging
 from copy import deepcopy
 from typing import Any
 
+import objc
 from AppKit import (
     NSAlert,
+    NSAlertFirstButtonReturn,
     NSApp,
     NSBezelStyleRounded,
     NSBox,
@@ -28,6 +30,7 @@ from AppKit import (
     NSColorWell,
     NSFont,
     NSNumberFormatter,
+    NSObject,
     NSPanel,
     NSPopUpButton,
     NSScrollView,
@@ -64,6 +67,27 @@ SECTION_GAP_SETTINGS = 20
 SETTINGS_PANEL_STYLE_MASK = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
 
 
+class _SettingsDelegate(NSObject):
+    """AppKit delegate bridging close/field events back to the controller.
+
+    The settings window is a plain Python controller; AppKit needs an
+    Objective-C object as its delegate and as the text-field delegate so it
+    can ask ``windowShouldClose:`` and report ``controlTextDidChange:``.
+    """
+
+    def initWithOwner_(self, owner: SettingsWindow) -> _SettingsDelegate:
+        self = objc.super(_SettingsDelegate, self).init()
+        if self is not None:
+            self.owner = owner
+        return self
+
+    def windowShouldClose_(self, sender: Any) -> bool:
+        return self.owner._window_should_close()
+
+    def controlTextDidChange_(self, notification: Any) -> None:
+        self.owner._mark_dirty()
+
+
 class SettingsWindow:
     """Settings panel controller with grouped form and live validation."""
 
@@ -88,6 +112,8 @@ class SettingsWindow:
         self._last_state_signature: tuple[Any, ...] | None = None
         self._color_wells: dict[str, NSColorWell] = {}
         self._color_hex_fields: dict[str, NSTextField] = {}
+        self._dirty = False
+        self._delegate: _SettingsDelegate | None = None
 
     @property
     def is_visible(self) -> bool:
@@ -143,6 +169,9 @@ class SettingsWindow:
         if NSApp() is None:
             raise RuntimeError("Settings window requires a running NSApplication")
 
+        self._dirty = False
+        self._delegate = _SettingsDelegate.alloc().initWithOwner_(self)
+
         # Main window
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
             ((0, 0), (PANEL_WIDTH, PANEL_HEIGHT)),
@@ -156,6 +185,7 @@ class SettingsWindow:
         panel.setBecomesKeyOnlyIfNeeded_(False)
         panel.setReleasedWhenClosed_(False)
         panel.setFrameAutosaveName_("HRMSettingsPanel")
+        panel.setDelegate_(self._delegate)
         panel.center()
 
         # Scroll view for content
@@ -331,6 +361,8 @@ class SettingsWindow:
         field.setStringValue_(value)
         if formatter:
             field.setFormatter_(formatter)
+        if self._delegate is not None:
+            field.setDelegate_(self._delegate)
         parent.addSubview_(field)
         self._controls[key] = field
 
@@ -365,6 +397,8 @@ class SettingsWindow:
             field.setFont_(NSFont.systemFontOfSize_(11))
             field.setTarget_(self)
             field.setAction_("zone_field_changed:")
+            if self._delegate is not None:
+                field.setDelegate_(self._delegate)
             parent.addSubview_(field)
             self._controls[f"zone_{key}"] = field
 
@@ -428,6 +462,8 @@ class SettingsWindow:
             hex_field.setFont_(NSFont.monospacedDigitSystemFontOfSize_weight_(11, 0))
             hex_field.setTarget_(self)
             hex_field.setAction_("hex_color_changed:")
+            if self._delegate is not None:
+                hex_field.setDelegate_(self._delegate)
             parent.addSubview_(hex_field)
             self._controls[f"color_{zone}"] = hex_field
             self._color_hex_fields[zone] = hex_field
@@ -482,6 +518,21 @@ class SettingsWindow:
 
     # ── Actions ─────────────────────────────────────────────────────────
 
+    def _mark_dirty(self) -> None:
+        """Record that the form differs from the last saved configuration."""
+        self._dirty = True
+
+    def _window_should_close(self) -> bool:
+        """Return whether the window may close, prompting on unsaved edits."""
+        if not self._dirty:
+            return True
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Discard unsaved changes?")
+        alert.setInformativeText_("Your edits to HRM settings have not been saved.")
+        alert.addButtonWithTitle_("Discard")
+        alert.addButtonWithTitle_("Cancel")
+        return alert.runModal() == NSAlertFirstButtonReturn
+
     def scan_action_(self, sender: Any) -> None:
         try:
             if self.state.snapshot_for_ui().scan_status == "scanning":
@@ -510,12 +561,14 @@ class SettingsWindow:
             self._selected_scan_address = result.address
             self._set_text("device_address", result.address)
             self._set_text("device_name", result.name)
+            self._mark_dirty()
         except Exception as exc:
             log.exception("Failed to apply selected scan result")
             self._show_error(f"Failed to use the selected device: {exc}")
 
     def color_well_changed_(self, sender: NSColorWell) -> None:
         """Sync hex field when colour well changes."""
+        self._mark_dirty()
         color = sender.color()
         hex_str = self._ns_color_to_hex(color)
         # Find which zone this well belongs to
@@ -529,6 +582,7 @@ class SettingsWindow:
 
     def hex_color_changed_(self, sender: NSTextField) -> None:
         """Sync colour well when hex field changes (on Enter)."""
+        self._mark_dirty()
         hex_str = sender.stringValue().strip()
         if _is_valid_hex(hex_str):
             color = _ns_color(hex_str)
@@ -545,6 +599,7 @@ class SettingsWindow:
 
     def zone_field_changed_(self, sender: NSTextField) -> None:
         """Inline validation of zone boundary fields."""
+        self._mark_dirty()
         try:
             # Collect current values
             z1_str = self._controls["zone_z1_max"].stringValue()
@@ -571,7 +626,7 @@ class SettingsWindow:
 
     def graph_window_changed_(self, sender: NSSegmentedControl) -> None:
         """Handle graph window segment change (value saved with Save)."""
-        pass  # Value is collected at save time
+        self._mark_dirty()
 
     def save_settings_(self, sender: Any) -> None:
         try:
@@ -582,6 +637,7 @@ class SettingsWindow:
             saved_config = self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG
             if self.on_config_saved is not None:
                 self.on_config_saved(old_config, deepcopy(saved_config))
+            self._dirty = False
             self.refresh_from_state(force=True)
             log.info("Settings saved")
         except (ValueError, OSError) as exc:
@@ -592,6 +648,22 @@ class SettingsWindow:
             self._show_error(f"Settings callback failed: {exc}")
 
     def reset_defaults_(self, sender: Any) -> None:
+        """Reset the form to defaults after asking for confirmation."""
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Reset all settings?")
+        alert.setInformativeText_(
+            "This replaces the current form values with the defaults. "
+            "Changes are applied when you click Save."
+        )
+        alert.addButtonWithTitle_("Reset")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+
+        self._apply_defaults_to_form()
+        self._mark_dirty()
+
+    def _apply_defaults_to_form(self) -> None:
         defaults = cfg_mod.DEFAULT_CONFIG
         self._selected_scan_address = ""
         self._set_text("device_address", defaults["device_address"])
@@ -625,13 +697,16 @@ class SettingsWindow:
             self._validation_labels[key].setStringValue_("")
 
     def close_settings_(self, sender: Any) -> None:
-        """Cancel and close without saving."""
+        """Cancel and close, prompting when the form has unsaved edits."""
+        if not self._window_should_close():
+            return
         self.close()
 
     # ── State sync ─────────────────────────────────────────────────────
 
     def _sync_config_fields(self) -> None:
         cfg = self.state.snapshot_for_ui().config or cfg_mod.DEFAULT_CONFIG
+        self._dirty = False
         self._set_text("device_address", cfg.get("device_address", ""))
         self._set_text("device_name", cfg.get("device_name", ""))
         self._set_text("max_hr", str(cfg.get("max_hr", 190)))
