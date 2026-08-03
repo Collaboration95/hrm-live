@@ -471,7 +471,7 @@ def test_settings_scan_callbacks_use_injected_functions() -> None:
 
 
 def test_import_graph() -> None:
-    """Graph module imports cleanly (requires matplotlib)."""
+    """Graph module imports cleanly."""
     import hrm_live.ui.graph as graph
 
     assert graph.render_graph

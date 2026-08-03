@@ -7,6 +7,8 @@ from hrm_live.ui.graph import (
     _chart_y_limits,
     _elapsed_tick_offsets,
     _format_elapsed_tick,
+    _resolve_chart_colors,
+    _segment_colors,
     render_graph,
     summarize_heart_rate,
 )
@@ -29,7 +31,6 @@ def test_render_none_single_point() -> None:
     # Single point should render (not None)
     rb = _make_ring_buffer([120])
     result = render_graph(rb)
-    # May return None if matplotlib unavailable in CI
     if result is not None:
         assert isinstance(result, bytes)
 
@@ -110,23 +111,21 @@ def test_chart_y_limits_focus_on_visible_readings() -> None:
     assert _chart_y_limits([60, 160]) == (40, 180)
 
 
-def test_render_line_changes_color_across_zones(monkeypatch) -> None:
-    from matplotlib.axes import Axes
+def test_segment_colors_follow_zones() -> None:
+    colors = _resolve_chart_colors(None)
+    zones = {"z1_max": 0.50, "z2_max": 0.70, "z3_max": 0.85}
+    assert _segment_colors([100, 130, 170, 190], 200, zones, colors) == [
+        "#F2D33B",
+        "#FF8A3D",
+        "#ED3C70",
+    ]
+    assert _segment_colors([120], 200, zones, colors) == ["#F2D33B"]
 
-    calls: list[str | None] = []
-    original_plot = Axes.plot
 
-    def capture_plot(self, *args, **kwargs):
-        calls.append(kwargs.get("color"))
-        return original_plot(self, *args, **kwargs)
-
-    monkeypatch.setattr(Axes, "plot", capture_plot)
-    rb = _make_ring_buffer([100, 130, 170, 190])
-    result = render_graph(
-        rb,
-        max_hr=200,
-        zones={"z1_max": 0.50, "z2_max": 0.70, "z3_max": 0.85},
-    )
-
+def test_render_graph_returns_png_bytes() -> None:
+    rb = _make_ring_buffer([100, 110, 120, 130, 140, 150])
+    result = render_graph(rb)
     assert result is not None
-    assert calls == ["#F2D33B", "#FF8A3D", "#ED3C70"]
+    assert isinstance(result, bytes)
+    # PNG magic header
+    assert result[:8] == b"\x89PNG\r\n\x1a\n"

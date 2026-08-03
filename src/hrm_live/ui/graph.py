@@ -1,7 +1,9 @@
-"""HR graph rendering — matplotlib (Agg backend) to PNG bytes.
+"""HR graph rendering — AppKit (CoreGraphics) to PNG bytes.
 
 Generates a rolling line graph of heart rate over the configured time
-window, with colored zone bands.
+window, with colored zone bands. Rendering is offscreen (no windows), so
+the chart needs no bundled charting library (matplotlib was removed in
+favor of this module; the packaged app is far smaller as a result).
 
 Usage:
 
@@ -12,35 +14,38 @@ Usage:
 
 from __future__ import annotations
 
-import io
 import logging
 import math
-import os
-import tempfile
 from collections.abc import Sequence
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 
-_MPLCONFIGDIR = Path(tempfile.gettempdir()) / "hrm-live-matplotlib"
-_MPLCONFIGDIR.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", str(_MPLCONFIGDIR))
-
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator
-
-from hrm_live.ui.tokens import (
-    CANVAS,
-    DIVIDER,
-    TEXT_SECONDARY,
-    ZONE_COLORS_DEFAULT,
+from AppKit import (
+    NSAffineTransform,
+    NSBezierPath,
+    NSBitmapImageFileTypePNG,
+    NSBitmapImageRep,
+    NSColor,
+    NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
+    NSGraphicsContext,
+    NSRoundLineCapStyle,
 )
+from Foundation import NSString
+
+from hrm_live.ui.tokens import CANVAS, DIVIDER, TEXT_SECONDARY, ZONE_COLORS_DEFAULT
 from hrm_live.zones import get_zone
 
 log = logging.getLogger(__name__)
+
+# ── Canvas geometry (matches the old 450x220 @ 1x figure) ────────────────
+
+CHART_WIDTH = 450
+CHART_HEIGHT = 220
+MARGIN_LEFT = 46
+MARGIN_RIGHT = 14
+MARGIN_TOP = 14
+MARGIN_BOTTOM = 28
 
 # Default zone colors for graph bands
 _ZONE_BAND_COLORS = dict(ZONE_COLORS_DEFAULT)
@@ -103,6 +108,26 @@ def _chart_color_for_bpm(
     return zone_colors.get(zone, _CHART_ZONE_COLORS_DEFAULT["Z1"])
 
 
+def _segment_colors(
+    bpms: Sequence[int],
+    max_hr: int,
+    zones: dict[str, float],
+    zone_colors: dict[str, str],
+) -> list[str]:
+    """Return one zone color per drawn line segment.
+
+    A single point renders as a dot in its own zone color; every other
+    segment takes the color of its midpoint so effort changes are visible
+    immediately instead of hiding in one blue stroke.
+    """
+    if len(bpms) == 1:
+        return [_chart_color_for_bpm(bpms[0], max_hr, zones, zone_colors)]
+    return [
+        _chart_color_for_bpm((bpms[index] + bpms[index + 1]) / 2, max_hr, zones, zone_colors)
+        for index in range(len(bpms) - 1)
+    ]
+
+
 def _format_elapsed_tick(elapsed_seconds: float, span_seconds: float) -> str:
     """Format a relative chart tick without repeating wall-clock minutes."""
     elapsed = max(0, int(round(elapsed_seconds)))
@@ -112,20 +137,43 @@ def _format_elapsed_tick(elapsed_seconds: float, span_seconds: float) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
+def _nice_step(raw: float) -> float:
+    """Choose the smallest ``1/2/5 x 10^k`` step that covers *raw*."""
+    if raw <= 0:
+        return 1.0
+    magnitude = 10 ** math.floor(math.log10(raw))
+    for multiplier in (1, 2, 5, 10):
+        step = multiplier * magnitude
+        if step >= raw:
+            return step
+    return 10 * magnitude
+
+
 def _elapsed_tick_offsets(span_seconds: float) -> list[float]:
     """Choose clean elapsed-time tick positions and always include the end."""
     if span_seconds <= 0:
         return [0.0]
 
-    locator = MaxNLocator(nbins=4, integer=True, steps=[1, 2, 5, 10])
-    offsets = [
-        float(value) for value in locator.tick_values(0, span_seconds) if 0 <= value <= span_seconds
-    ]
+    step = _nice_step(span_seconds / 4.0)
+    offsets = [float(index * step) for index in range(int(span_seconds // step) + 1)]
     if not offsets:
         offsets = [0.0]
     if offsets[-1] < span_seconds:
         offsets.append(span_seconds)
     return offsets
+
+
+def _nice_ticks(lower: float, upper: float, nbins: int) -> list[float]:
+    """Return integer-friendly tick positions covering [lower, upper]."""
+    if upper <= lower:
+        return [lower]
+    step = _nice_step((upper - lower) / nbins)
+    ticks: list[float] = []
+    value = math.ceil(lower / step) * step
+    while value <= upper + 1e-9:
+        ticks.append(value)
+        value += step
+    return ticks or [lower]
 
 
 def _chart_y_limits(bpms: Sequence[int]) -> tuple[float, float]:
@@ -149,6 +197,179 @@ def _chart_y_limits(bpms: Sequence[int]) -> tuple[float, float]:
     lower = math.floor(lower / 5) * 5
     upper = math.ceil(upper / 5) * 5
     return lower, upper
+
+
+# ── AppKit drawing helpers ───────────────────────────────────────────────
+
+
+def _ns_color(hex_str: str, alpha: float = 1.0) -> NSColor:
+    """Convert a ``#RRGGBB`` hex string to an NSColor (optionally alpha)."""
+    try:
+        h = hex_str.lstrip("#")
+        r = int(h[0:2], 16) / 255.0
+        g = int(h[2:4], 16) / 255.0
+        b = int(h[4:6], 16) / 255.0
+        return NSColor.colorWithRed_green_blue_alpha_(r, g, b, alpha)
+    except Exception:
+        return NSColor.labelColor()
+
+
+def _tick_attributes() -> dict:
+    return {
+        NSFontAttributeName: NSFont.systemFontOfSize_(9),
+        NSForegroundColorAttributeName: _ns_color(TEXT_SECONDARY),
+    }
+
+
+def _draw_text(
+    text: str,
+    point: tuple[float, float],
+    attributes: dict,
+    *,
+    align: str = "left",
+    valign: str = "center",
+) -> None:
+    """Draw a string so *point* anchors it horizontally/vertically."""
+    ns = NSString.alloc().initWithString_(text)
+    size = ns.sizeWithAttributes_(attributes)
+    x, y = point
+    if align == "center":
+        x -= size.width / 2
+    elif align == "right":
+        x -= size.width
+    if valign == "center":
+        y -= size.height / 2
+    ns.drawAtPoint_withAttributes_((x, y), attributes)
+
+
+def _draw_chart(
+    timestamps: Sequence[datetime],
+    bpms: Sequence[int],
+    max_hr: int,
+    zones: dict[str, float],
+    zone_colors: dict[str, str],
+    width: int,
+    height: int,
+) -> None:
+    """Draw the chart into the current graphics context."""
+    left = MARGIN_LEFT
+    right = width - MARGIN_RIGHT
+    bottom = MARGIN_BOTTOM
+    top = height - MARGIN_TOP
+    plot_w = right - left
+    plot_h = top - bottom
+
+    t0 = timestamps[0].timestamp()
+    t1 = timestamps[-1].timestamp()
+    if t1 == t0:
+        # Single data point — add 30s padding on each side.
+        t0 -= 30.0
+        t1 += 30.0
+    span_seconds = max(0.0, t1 - t0)
+
+    lower, upper = _chart_y_limits(bpms)
+
+    def x_px(timestamp: datetime) -> float:
+        return left + (timestamp.timestamp() - t0) / span_seconds * plot_w
+
+    def y_px(value: float) -> float:
+        return bottom + (value - lower) / (upper - lower) * plot_h
+
+    z1_bpm = max_hr * zones["z1_max"]
+    z2_bpm = max_hr * zones["z2_max"]
+    z3_bpm = max_hr * zones["z3_max"]
+
+    # ── Zone bands (fill between) ─────────────────────────────────────
+    def band(zone: str, band_lower: float, band_upper: float) -> None:
+        low = max(band_lower, lower)
+        high = min(band_upper, upper)
+        if high <= low:
+            return
+        _ns_color(zone_colors[zone], 0.14).setFill()
+        NSBezierPath.fillRect_(((left, y_px(low)), (plot_w, y_px(high) - y_px(low))))
+
+    band("Z1", 0.0, z1_bpm)
+    band("Z2", z1_bpm, z2_bpm)
+    band("Z3", z2_bpm, z3_bpm)
+    band("Z4", z3_bpm, max_hr * 1.15)
+
+    # ── Horizontal grid lines ─────────────────────────────────────────
+    for tick in _nice_ticks(lower, upper, 5):
+        y = y_px(tick)
+        path = NSBezierPath.bezierPath()
+        path.moveToPoint_((left, y))
+        path.lineToPoint_((right, y))
+        path.setLineWidth_(0.7)
+        path.setLineDash_count_phase_([3.0, 3.0], 2, 0.0)
+        _ns_color(DIVIDER, 0.65).setStroke()
+        path.stroke()
+
+    # ── Zone boundary lines (dashed) ──────────────────────────────────
+    for bpm_val in (z1_bpm, z2_bpm, z3_bpm):
+        if lower < bpm_val < upper:
+            y = y_px(bpm_val)
+            path = NSBezierPath.bezierPath()
+            path.moveToPoint_((left, y))
+            path.lineToPoint_((right, y))
+            path.setLineWidth_(0.5)
+            path.setLineDash_count_phase_([4.0, 3.0], 2, 0.0)
+            _ns_color(DIVIDER, 0.5).setStroke()
+            path.stroke()
+
+    # ── HR trace (one segment per zone color) ─────────────────────────
+    colors = _segment_colors(bpms, max_hr, zones, zone_colors)
+    if len(bpms) == 1:
+        cx = x_px(timestamps[0])
+        cy = y_px(bpms[0])
+        dot = NSBezierPath.bezierPathWithOvalInRect_(((cx - 3, cy - 3), (6, 6)))
+        _ns_color(colors[0]).setFill()
+        dot.fill()
+    else:
+        for index in range(len(bpms) - 1):
+            path = NSBezierPath.bezierPath()
+            path.moveToPoint_((x_px(timestamps[index]), y_px(bpms[index])))
+            path.lineToPoint_((x_px(timestamps[index + 1]), y_px(bpms[index + 1])))
+            path.setLineWidth_(2.6)
+            path.setLineCapStyle_(NSRoundLineCapStyle)
+            _ns_color(colors[index]).setStroke()
+            path.stroke()
+
+    # ── Axes spines (bottom + left) ───────────────────────────────────
+    spine = NSBezierPath.bezierPath()
+    spine.moveToPoint_((left, bottom))
+    spine.lineToPoint_((right, bottom))
+    spine.moveToPoint_((left, bottom))
+    spine.lineToPoint_((left, top))
+    spine.setLineWidth_(0.8)
+    _ns_color(DIVIDER).setStroke()
+    spine.stroke()
+
+    # ── X tick labels (relative elapsed time) ─────────────────────────
+    tick_attributes = _tick_attributes()
+    for offset in _elapsed_tick_offsets(span_seconds):
+        x = left + (offset / span_seconds) * plot_w
+        _draw_text(
+            _format_elapsed_tick(offset, span_seconds),
+            (x, bottom - 12),
+            tick_attributes,
+            align="center",
+        )
+
+    # ── Y tick labels ─────────────────────────────────────────────────
+    for tick in _nice_ticks(lower, upper, 5):
+        _draw_text(
+            f"{tick:.0f}",
+            (left - 6, y_px(tick)),
+            tick_attributes,
+            align="right",
+        )
+
+    # ── Y axis title (rotated) ────────────────────────────────────────
+    transform = NSAffineTransform.transform()
+    transform.translateXBy_yBy_(12, bottom + plot_h / 2)
+    transform.rotateByDegrees_(-90)
+    transform.concat()
+    _draw_text("BPM", (0, 0), tick_attributes, align="center", valign="center")
 
 
 def render_graph(
@@ -186,126 +407,50 @@ def render_graph(
     zones = {**_DEFAULT_ZONES, **(zones or {})}
     zone_colors = _resolve_chart_colors(zone_colors)
 
-    # Filter data within the window.  The same helper powers the summary text
-    # so the numbers and plotted points always describe the same readings.
     filtered = _windowed_readings(ring_buffer, window_minutes)
-
     if not filtered:
         return None
 
     timestamps = [t for t, _ in filtered]
     bpms = [b for _, b in filtered]
 
-    # Build zone boundaries (BPM values)
-    z1_bpm = max_hr * zones["z1_max"]
-    z2_bpm = max_hr * zones["z2_max"]
-    z3_bpm = max_hr * zones["z3_max"]
-
-    # ── Plot ─────────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(4.5, 2.2), dpi=100)
-    fig.patch.set_facecolor(CANVAS)
-    ax.set_facecolor(CANVAS)
-
-    # Zone bands (fill between)
-    ax.axhspan(0, z1_bpm, facecolor=zone_colors["Z1"], alpha=0.14, zorder=0)
-    ax.axhspan(
-        z1_bpm,
-        z2_bpm,
-        facecolor=zone_colors["Z2"],
-        alpha=0.14,
-        zorder=0,
+    rep = NSBitmapImageRep.alloc().initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel_(
+        None,
+        CHART_WIDTH,
+        CHART_HEIGHT,
+        8,
+        4,
+        True,
+        False,
+        "NSCalibratedRGBColorSpace",
+        0,
+        0,
     )
-    ax.axhspan(
-        z2_bpm,
-        z3_bpm,
-        facecolor=zone_colors["Z3"],
-        alpha=0.14,
-        zorder=0,
-    )
-    ax.axhspan(
-        z3_bpm,
-        max_hr * 1.15,
-        facecolor=zone_colors["Z4"],
-        alpha=0.14,
-        zorder=0,
-    )
+    if rep is None:
+        log.error("Failed to create offscreen bitmap for HR graph")
+        return None
 
-    # Zone boundary lines (dashed)
-    for bpm_val in (z1_bpm, z2_bpm, z3_bpm):
-        color = DIVIDER
-        ax.axhline(bpm_val, color=color, linewidth=0.5, linestyle="--", alpha=0.5)
+    context = NSGraphicsContext.graphicsContextWithBitmapImageRep_(rep)
+    if context is None:
+        log.error("Failed to create graphics context for HR graph")
+        return None
 
-    # HR line: each segment follows the zone of its midpoint, making effort
-    # changes visible immediately instead of hiding them in one blue stroke.
-    if len(timestamps) == 1:
-        ax.plot(
-            timestamps,
-            bpms,
-            color=_chart_color_for_bpm(bpms[0], max_hr, zones, zone_colors),
-            marker="o",
-            markersize=5,
-            linewidth=0,
-            zorder=4,
-        )
-    else:
-        for index in range(len(timestamps) - 1):
-            midpoint = (bpms[index] + bpms[index + 1]) / 2
-            ax.plot(
-                timestamps[index : index + 2],
-                bpms[index : index + 2],
-                color=_chart_color_for_bpm(midpoint, max_hr, zones, zone_colors),
-                linewidth=2.6,
-                solid_capstyle="round",
-                zorder=4,
-            )
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.setCurrentContext_(context)
+    try:
+        try:
+            _ns_color(CANVAS).setFill()
+            NSBezierPath.fillRect_(((0, 0), (CHART_WIDTH, CHART_HEIGHT)))
+            _draw_chart(timestamps, bpms, max_hr, zones, zone_colors, CHART_WIDTH, CHART_HEIGHT)
+            context.flushGraphics()
+        except Exception:
+            log.exception("Failed to draw heart-rate graph")
+            return None
+    finally:
+        NSGraphicsContext.restoreGraphicsState()
 
-    # Style.  Use elapsed time from the first visible reading instead of a
-    # wall-clock formatter: second-level samples otherwise render as the same
-    # repeated ``15:43`` label throughout a short window.
-    if timestamps[0] != timestamps[-1]:
-        axis_start = timestamps[0]
-        axis_end = timestamps[-1]
-    else:
-        # Single data point — add 30s padding on each side.
-        pad = timedelta(seconds=30)
-        axis_start = timestamps[0] - pad
-        axis_end = timestamps[-1] + pad
-    ax.set_xlim(axis_start, axis_end)
-
-    axis_start_num = mdates.date2num(axis_start)
-    axis_end_num = mdates.date2num(axis_end)
-    span_seconds = max(0.0, (axis_end_num - axis_start_num) * 86400)
-    tick_offsets = _elapsed_tick_offsets(span_seconds)
-    tick_values = [axis_start_num + offset / 86400 for offset in tick_offsets]
-    ax.xaxis.set_major_locator(FixedLocator(tick_values))
-    ax.xaxis.set_major_formatter(
-        FuncFormatter(
-            lambda value, _: _format_elapsed_tick(
-                (value - axis_start_num) * 86400,
-                span_seconds,
-            )
-        )
-    )
-
-    lower, upper = _chart_y_limits(bpms)
-    ax.set_ylim(lower, upper)
-    ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
-    ax.tick_params(colors=TEXT_SECONDARY, labelsize=9, length=0, pad=4)
-    ax.grid(axis="y", color=DIVIDER, linewidth=0.7, alpha=0.65)
-    ax.set_axisbelow(True)
-    for side, spine in ax.spines.items():
-        spine.set_color(DIVIDER)
-        spine.set_linewidth(0.8)
-        if side in {"top", "right"}:
-            spine.set_visible(False)
-    ax.set_ylabel("BPM", color=TEXT_SECONDARY, fontsize=9, labelpad=6)
-
-    # Tight layout
-    fig.tight_layout(pad=0.5)
-
-    # Render to PNG bytes
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100, facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
+    data = rep.representationUsingType_properties_(NSBitmapImageFileTypePNG, None)
+    if data is None:
+        log.error("Failed to encode HR graph as PNG")
+        return None
+    return bytes(data)
