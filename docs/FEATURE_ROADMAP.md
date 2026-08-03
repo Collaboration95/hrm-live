@@ -198,7 +198,7 @@ a typical workout without manually managing files mid-flow.
 
 #### Tests and automation
 
-- Raise the coverage floor from 54% in deliberate increments, beginning with
+- Raise the coverage floor from 60% in deliberate increments, beginning with
   presentation logic, failure states, config migrations, and BLE reconnection.
 - Add unit tests for semantic colour choices, status-title accessibility labels,
   menu-bar state variants, colour parsing/round-tripping, and zone editor

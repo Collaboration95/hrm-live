@@ -11,9 +11,14 @@ with a zone gauge, HR graph, and session recording.
   graph, session stats, and start/stop controls
 - **BLE HRM support** for standard GATT Heart Rate Measurement (0x2A37)
 - **4-zone model** with configurable boundaries and colors
+- **Live zone preview** in Settings that updates the ramp and BPM cutoffs as
+  you edit colors, boundaries, or max HR
+- **Unsaved-changes protection** in Settings (discard confirmation and a
+  confirmed Reset to Defaults)
 - **Session recording** with user-selected CSV and JSON export
 - **Saved session history** for reopening recent sessions and exported files
 - **Configurable settings** (max HR, zone boundaries, colors, graph window)
+- **Native AppKit rendering** — no matplotlib/numpy dependency (app ≈ 28 MB)
 
 ## Requirements
 
@@ -171,12 +176,12 @@ src/
     state.py        # Locked AppState and immutable snapshots
     config.py       # Config load/save/validate
     zones.py        # Zone calculation helpers
-    session.py      # Session lifecycle and explicit CSV export
+    session.py      # Session lifecycle and explicit CSV + JSON export
     ble.py          # BLE HR parsing and connection loop
     ui/
       menubar.py    # Status item and shutdown routing
       popover.py    # Dashboard and save-panel orchestration
-      graph.py      # HR graph rendering (matplotlib Agg)
+      graph.py      # HR graph rendering (offscreen AppKit -> PNG)
       settings.py   # Settings window
       tokens.py     # Semantic design tokens (colors, type, spacing)
 tests/
