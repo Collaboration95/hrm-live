@@ -256,6 +256,7 @@ class SettingsWindow:
         self._color_wells: dict[str, NSColorWell] = {}
         self._color_hex_fields: dict[str, NSTextField] = {}
         self._preview_view: ZonePreviewView | None = None
+        self._device_card: Any | None = None
         self._dirty = False
         self._delegate: _SettingsDelegate | None = None
 
@@ -341,7 +342,7 @@ class SettingsWindow:
         self._scroll_view = scroll
 
         # Content view inside scroll
-        content_h = 780  # Tall enough to allow scrolling
+        content_h = 960  # Tall enough to allow scrolling
         content = NSView.alloc().initWithFrame_(((0, 0), (PANEL_WIDTH - 20, content_h)))
         scroll.setDocumentView_(content)
         self._content_view = content
@@ -419,7 +420,10 @@ class SettingsWindow:
         y = self._add_footer(content, y)
 
         # Set content height
-        content.setFrameSize_((PANEL_WIDTH - 20, y + OUTER_PADDING))
+        # Document height spans from the bottom-most control to the top of
+        # the first section (content_h), so taller sections never clip or
+        # collapse the scroll view.
+        content.setFrameSize_((PANEL_WIDTH - 20, max(content_h, content_h - y)))
         self._panel = panel
         log.debug("Settings panel built: frame=%s", panel.frame())
 
@@ -511,6 +515,7 @@ class SettingsWindow:
         card.setBorderWidth_(1.0)
         card.setCornerRadius_(8.0)
         parent.addSubview_(card)
+        self._device_card = card
 
         cy = y - CARD_PADDING
 

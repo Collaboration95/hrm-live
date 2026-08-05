@@ -117,7 +117,7 @@ With coverage:
 make coverage
 ```
 
-The current coverage gate is 60%, with the suite measuring ~76% locally (164 tests).
+The current coverage gate is 60%, with the suite measuring ~77% locally (236 tests).
 
 ## Configuration
 
@@ -152,6 +152,23 @@ Format:
 timestamp,bpm,zone
 2025-08-10T07:34:12,142,Z3
 ```
+
+## Screenshots
+
+Light-mode release captures live in [`docs/screenshots/`](docs/screenshots/):
+
+- [`dashboard-light.png`](docs/screenshots/dashboard-light.png) — the dashboard
+  popover: hero gauge with live BPM, 16:9 AppKit trend graph, session card,
+  recent sessions with zone-time bars, and the action area.
+- [`settings-zones.png`](docs/screenshots/settings-zones.png) — Settings zones
+  section: boundary percent fields, native `NSColorWell`s + hex fields, and the
+  live zone-ramp preview with BPM cutoffs.
+- [`settings-device.png`](docs/screenshots/settings-device.png) — the compact
+  Device setup card: connection status, Scan button + live result count,
+  Discovered picker + Use Device, read-only Address, and editable Name.
+
+Each screenshot also has a `-1x` variant. Regenerate them with
+`python scripts/capture_screenshots.py`.
 
 ## GitHub Workflow
 

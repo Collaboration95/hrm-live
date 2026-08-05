@@ -24,6 +24,13 @@ and purposeful accent colours—without copying its product or brand assets.
 
 ## Evidence and current-state assessment
 
+> **Status note:** every row below was a real v1 gap identified against the
+> July 16 screens and the v0.9.0 AppKit implementation. All of them shipped in
+> **v0.9.0**; the table is kept as a decision record, not as an open task list.
+> The approved baseline is now the light-mode screenshots in
+> `docs/screenshots/` (dashboard hero, Settings zones + preview, Settings
+> device).
+
 The July 16 screens and the current AppKit implementation identify these
 concrete issues.
 
@@ -204,8 +211,9 @@ a typical workout without manually managing files mid-flow.
   menu-bar state variants, colour parsing/round-tripping, and zone editor
   validation.
 - Add screenshot-based visual regression tests for dashboard and settings in
-  light/dark mode at normal and larger accessibility text sizes. Treat the three
-  supplied screens as initial before-state references, not approved baselines.
+  light/dark mode at normal and larger accessibility text sizes. Treat the
+  current light-mode screenshots in `docs/screenshots/` as the approved
+  baseline; the historical July 16 screens are external and out of scope.
 - Add an end-to-end smoke test using a deterministic simulated HR sample stream
   and a scripted export destination. Keep real-strap tests as a documented
   manual matrix.
