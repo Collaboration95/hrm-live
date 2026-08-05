@@ -13,7 +13,10 @@ from hrm_live.ui.tokens import (
     SURFACE_ALT,
     ZONE_COLORS_DEFAULT,
     menu_accessibility_label,
+    menu_dot_char,
+    menu_dot_range,
     menu_title,
+    menu_tooltip,
     status_dot_colour,
     zone_accent,
 )
@@ -68,6 +71,9 @@ class TestMenuTitle:
     def test_connected_with_bpm(self) -> None:
         assert menu_title(72, "connected") == "♥ 72 bpm"
 
+    def test_connected_with_zone_suffix(self) -> None:
+        assert menu_title(72, "connected", zone="Z2", zone_name="Aerobic") == ("♥ 72 bpm Aerobic")
+
     def test_connected_no_bpm(self) -> None:
         assert menu_title(None, "connected") == "♡ ---"
 
@@ -76,6 +82,43 @@ class TestMenuTitle:
 
     def test_error(self) -> None:
         assert menu_title(72, "error") == "♡ ---"
+
+    def test_reconnecting_uses_single_disconnected_literal(self) -> None:
+        assert menu_title(None, "reconnecting") == "♡ ---"
+
+
+class TestMenuDotChar:
+    def test_connected_is_filled_circle(self) -> None:
+        assert menu_dot_char("connected") == "●"
+
+    def test_disconnected_and_error_are_open_circle(self) -> None:
+        assert menu_dot_char("disconnected") == "○"
+        assert menu_dot_char("error") == "○"
+
+    def test_connecting_uses_dotted_circle(self) -> None:
+        assert menu_dot_char("connecting") == "◌"
+
+    def test_unknown_status_returns_open_circle(self) -> None:
+        assert menu_dot_char("mystery") == "○"
+
+    def test_dot_range_points_at_trailing_glyph(self) -> None:
+        full = "♥ 62 bpm Aerobic ●"
+        start, length = menu_dot_range(full)
+        assert full[start : start + length] == "●"
+
+
+class TestMenuTooltip:
+    def test_connected_shows_device_name(self) -> None:
+        assert menu_tooltip("Polar H10", "connected") == "Polar H10 — connected"
+
+    def test_connected_without_name_uses_generic_label(self) -> None:
+        assert menu_tooltip("", "connected") == "Heart rate monitor — connected"
+
+    def test_never_contains_a_raw_address(self) -> None:
+        assert "AA:BB:CC" not in menu_tooltip("Polar H10", "connected")
+
+    def test_disconnected_status(self) -> None:
+        assert menu_tooltip("Polar H10", "disconnected") == ("Heart rate monitor — disconnected")
 
 
 class TestMenuAccessibilityLabel:

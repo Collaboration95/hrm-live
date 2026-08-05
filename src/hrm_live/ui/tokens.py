@@ -90,6 +90,30 @@ def status_dot_colour(connection_status: str) -> str:
     }.get(connection_status, STATUS_DISCONNECTED)
 
 
+# Status dot glyphs (visible without colour; colour is a secondary cue).
+MENU_DOT_CHARS: dict[str, str] = {
+    "connected": "●",  # Filled circle
+    "connecting": "◌",  # Dotted circle (scanning/connecting)
+    "reconnecting": "◌",  # Dotted circle
+    "disconnected": "○",  # Open circle
+    "error": "○",  # Open circle (changes colour)
+}
+
+
+def menu_dot_char(connection_status: str) -> str:
+    """Return the status dot glyph for a connection state."""
+    return MENU_DOT_CHARS.get(connection_status, "○")
+
+
+def menu_dot_range(full_text: str) -> tuple[int, int]:
+    """Return the character range of the trailing status dot in *full_text*.
+
+    The menu bar colours exactly this range; keeping the offset here means
+    callers never hand-compute where the dot lives.
+    """
+    return (len(full_text) - 1, 1)
+
+
 def zone_accent(zone: str, colors_cfg: dict[str, str] | None = None) -> str:
     """Return zone accent colour from config, falling back to defaults."""
     if colors_cfg and zone in colors_cfg:
@@ -97,11 +121,36 @@ def zone_accent(zone: str, colors_cfg: dict[str, str] | None = None) -> str:
     return ZONE_COLORS_DEFAULT.get(zone, STATUS_DISCONNECTED)
 
 
-def menu_title(bpm: int | None, connection_status: str) -> str:
-    """Build a plain-text menu bar title without colour embedding."""
+def menu_title(
+    bpm: int | None,
+    connection_status: str,
+    zone: str | None = None,
+    zone_name: str | None = None,
+) -> str:
+    """Build the single plain-text menu bar title.
+
+    Runtime and tests share this one composition path. Pass *zone_name* to
+    reproduce the live menu bar string (e.g. ``"♥ 62 bpm Aerobic"``); the
+    defaults keep the historical test output (``"♥ 72 bpm"``). The
+    disconnected state always renders the same literal.
+    """
     if bpm is not None and connection_status == "connected":
-        return f"♥ {bpm} bpm"
+        base = f"♥ {bpm} bpm"
+        if zone_name:
+            return f"{base} {zone_name}"
+        return base
     return "♡ ---"
+
+
+def menu_tooltip(device_name: str, connection_status: str) -> str:
+    """Privacy-safe status bar tooltip.
+
+    Never includes the BLE address — only the user-set device name.
+    """
+    if connection_status == "connected":
+        label = device_name or "Heart rate monitor"
+        return f"{label} — connected"
+    return f"Heart rate monitor — {connection_status}"
 
 
 def menu_accessibility_label(
