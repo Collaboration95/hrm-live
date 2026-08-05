@@ -17,6 +17,7 @@ the entire view hierarchy every timer tick.
 from __future__ import annotations
 
 import logging
+import math
 from copy import deepcopy
 from typing import Any
 
@@ -43,12 +44,13 @@ from AppKit import (
     NSViewController,
     NSWorkspace,
 )
-from Foundation import NSURL, NSString
+from Foundation import NSURL, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer
 
 import hrm_live.config as cfg_mod
 import hrm_live.session as sess_mod
 from hrm_live.state import AppState, ExportSnapshot, UISnapshot
 from hrm_live.ui.graph import render_graph, summarize_heart_rate
+from hrm_live.ui.motion import should_pulse
 from hrm_live.ui.tokens import (
     CANVAS,
     CARD_PADDING,
@@ -128,6 +130,8 @@ class HRMPopover:
         self._header_device_label: NSTextField | None = None
         self._header_dot_view: NSView | None = None
         self._action_area_y: float = 0
+        self._pulse_timer: Any = None
+        self._pulse_phase: float = 0.0
         self._built = False
 
     @property
@@ -139,6 +143,7 @@ class HRMPopover:
         if self.is_shown:
             if self._popover:
                 self._popover.performClose_(sender)
+            self._stop_pulse()
         else:
             self._show(sender)
 
@@ -162,6 +167,7 @@ class HRMPopover:
             sender,
             POPOVER_PREFERRED_EDGE,
         )
+        self._sync_pulse()
 
     def refresh(self) -> None:
         """Update persistent view values without rebuilding the hierarchy."""
@@ -225,6 +231,58 @@ class HRMPopover:
 
         # ── Recent sessions ────────────────────────────────────────
         self._update_recent_sessions(s)
+
+        # ── Hero gauge live pulse (Reduce Motion aware) ─────────────
+        self._sync_pulse()
+
+    # ── Pulse (subtle live alpha breathing on the hero gauge) ────────
+
+    def teardown(self) -> None:
+        """Stop any running animation; safe to call from the shutdown path."""
+        self._stop_pulse()
+
+    def _sync_pulse(self) -> None:
+        """Start or stop the pulse based on current state and motion policy."""
+        s = self.state.snapshot_for_ui()
+        if should_pulse(s.connection_status, self._reduce_motion_enabled()):
+            self._start_pulse()
+        else:
+            self._stop_pulse()
+
+    def _start_pulse(self) -> None:
+        if self._pulse_timer is not None:
+            return
+        self._pulse_timer = _schedule_pulse_timer(self._pulse_tick)
+
+    def _stop_pulse(self) -> None:
+        if self._pulse_timer is not None:
+            try:
+                self._pulse_timer.invalidate()
+            except Exception:
+                log.debug("Failed to invalidate pulse timer", exc_info=True)
+            self._pulse_timer = None
+        if self._gauge_view is not None:
+            self._gauge_view.setPulseAlpha_(0.0)
+
+    def _pulse_tick(self) -> None:
+        """Advance the breathing phase; runs on the main thread at ~10 Hz."""
+        if not self.is_shown:
+            self._stop_pulse()
+            return
+        s = self.state.snapshot_for_ui()
+        if not should_pulse(s.connection_status, self._reduce_motion_enabled()):
+            self._stop_pulse()
+            return
+        self._pulse_phase += 2 * math.pi * 0.5 * 0.1  # 0.5 Hz sine at 10 Hz ticks
+        alpha = 0.15 * math.sin(self._pulse_phase)
+        if self._gauge_view is not None:
+            self._gauge_view.setPulseAlpha_(alpha)
+
+    def _reduce_motion_enabled(self) -> bool:
+        try:
+            return bool(NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceMotion())
+        except Exception:
+            return False
 
     def _calculate_height(self) -> float:
         """Estimate the total popover height based on content sections."""
@@ -1193,7 +1251,13 @@ class DonutGaugeView(NSView):
             self._zone_bounds: dict[str, float] = {}
             self._max_hr: int = 190
             self._colors_cfg: dict[str, str] = {}
+            self._pulse_alpha: float = 0.0
         return self
+
+    def setPulseAlpha_(self, alpha: float) -> None:
+        """Set the arc alpha breathing offset and redraw just the arc."""
+        self._pulse_alpha = float(alpha)
+        self.setNeedsDisplay_(True)
 
     def setBpm_zone_zoneBounds_maxHr_colorsCfg_(
         self,
@@ -1250,6 +1314,8 @@ class DonutGaugeView(NSView):
             end_angle = fraction * 360.0
 
             color = _ns_color(zone_accent(self._zone, self._colors_cfg))
+            if self._pulse_alpha:
+                color = color.colorWithAlphaComponent_(max(0.0, min(1.0, 1.0 + self._pulse_alpha)))
             color.setStroke()
 
             arc_path = NSBezierPath.bezierPath()
@@ -1371,6 +1437,18 @@ def recent_zone_fractions(zone_times: dict[str, float]) -> list[tuple[str, float
 def _default_open_url(url: str) -> None:
     """Open a local artifact URL in its default app."""
     NSWorkspace.sharedWorkspace().openURL_(NSURL.fileURLWithPath_(url))
+
+
+PULSE_TICK_SECONDS = 0.1
+
+
+def _schedule_pulse_timer(block: Any) -> Any:
+    """Schedule a repeating main-run-loop timer for the pulse."""
+    timer = NSTimer.timerWithTimeInterval_repeats_block_(
+        PULSE_TICK_SECONDS, True, lambda _timer: block()
+    )
+    NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSRunLoopCommonModes)
+    return timer
 
 
 def _make_label(text: str, font: NSFont, color: NSColor, frame: tuple) -> NSTextField:

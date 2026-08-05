@@ -312,6 +312,7 @@ class HRMBarApp(rumps.App):
 
         if self.timer is not None:
             self.timer.stop()
+        self.popover.teardown()
         rumps.events.before_start.unregister(self._configure_status_item)
         if manager is not None:
             stop_ble_background(manager)
