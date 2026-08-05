@@ -78,6 +78,7 @@ log = logging.getLogger(__name__)
 
 POPOVER_WIDTH = 344
 RECENT_SESSION_ROWS = 4
+RECENT_ROW_H = 44  # summary + detail line + stacked zone mini-bar
 HERO_GAUGE_SIZE = 164
 TREND_HEADER_HEIGHT = 48
 # Keep the popover vertically anchored to the status-item button.  Passing
@@ -93,6 +94,7 @@ class HRMPopover:
         state: AppState,
         *,
         save_panel_factory: Any | None = None,
+        open_url_factory: Any | None = None,
         on_quit: Any | None = None,
     ) -> None:
         self.state = state
@@ -100,6 +102,7 @@ class HRMPopover:
         self._latest_graph_bytes: bytes | None = None
         self._latest_graph_key: tuple[Any, ...] | None = None
         self._save_panel_factory = save_panel_factory or macos_save_panel
+        self._open_url_cb = open_url_factory or _default_open_url
         self._on_quit = on_quit
         self.on_settings: Any = None  # callback for settings button
 
@@ -236,7 +239,12 @@ class HRMPopover:
         session_h = 24 + INLINE_GAP + 42 + INLINE_GAP + 96 + CARD_PADDING * 2
         session_h += INLINE_GAP + SECTION_GAP
         action_h = 12 + 40 + INLINE_GAP + 36 + SECTION_GAP
-        recent_h = 24 + INLINE_GAP + 22 + CARD_PADDING * 2
+        recent_count = len(self.state.snapshot_for_ui().recent_sessions)
+        recent_visible = min(recent_count, RECENT_SESSION_ROWS) or 1
+        recent_note_h = 16 if recent_count else 0
+        recent_h = (
+            24 + INLINE_GAP + recent_visible * RECENT_ROW_H + recent_note_h + CARD_PADDING * 2
+        )
         return (
             OUTER_PADDING
             + header_h
@@ -862,7 +870,7 @@ class HRMPopover:
         x = OUTER_PADDING
         card_w = POPOVER_WIDTH - 2 * OUTER_PADDING
         header_h = 24
-        row_h = 22
+        row_h = RECENT_ROW_H
         visible_rows = min(len(s.recent_sessions), RECENT_SESSION_ROWS) or 1
         note_h = 16 if s.recent_sessions else 0
         card_h = header_h + INLINE_GAP + visible_rows * row_h + note_h + CARD_PADDING * 2
@@ -883,6 +891,7 @@ class HRMPopover:
         cy -= header_h + INLINE_GAP
 
         recent = list(reversed(s.recent_sessions[-RECENT_SESSION_ROWS:]))
+        colors_cfg = (s.config or {}).get("zone_colors", {})
         container = NSView.alloc().initWithFrame_(
             (
                 (x + CARD_PADDING, cy - visible_rows * row_h),
@@ -891,7 +900,7 @@ class HRMPopover:
         )
         root.addSubview_(container)
         self._recent_sessions_container = container
-        self._rebuild_recent_sessions(container, recent)
+        self._rebuild_recent_sessions(container, recent, colors_cfg)
 
         if len(s.recent_sessions) > RECENT_SESSION_ROWS:
             note = _make_label(
@@ -908,11 +917,12 @@ class HRMPopover:
         self,
         container: NSView,
         sessions: list[Any],
+        colors_cfg: dict,
     ) -> None:
         for child in list(container.subviews()):
             child.removeFromSuperview()
 
-        row_h = 22
+        row_h = RECENT_ROW_H
         if not sessions:
             empty = _make_label(
                 "Archived sessions will appear here after you stop and save.",
@@ -923,18 +933,52 @@ class HRMPopover:
             container.addSubview_(empty)
             return
 
+        content_w = container.frame().size.width
         for idx, session in enumerate(sessions):
             row_y = (len(sessions) - idx - 1) * row_h + 2
+            top = row_y + row_h
+
+            # Summary line (newest first, mirrored by tag -> reversed slice)
             label = _make_label(
                 session.display_summary(),
                 NSFont.systemFontOfSize_(10),
                 _ns_color(TEXT_PRIMARY if session.has_export else TEXT_SECONDARY),
-                (0, row_y, container.frame().size.width - 120, 18),
+                (0, top - 16, content_w - 120, 14),
             )
             container.addSubview_(label)
 
+            # Second line: Avg / Max / transitions, plus a stacked zone bar.
+            meta = _make_label(
+                recent_second_line(session),
+                NSFont.systemFontOfSize_(9),
+                _ns_color(TEXT_SECONDARY),
+                (0, top - 32, content_w - 120, 12),
+            )
+            container.addSubview_(meta)
+
+            self._add_zone_mini_bar(
+                container, session, colors_cfg, (0, row_y + 5, content_w - 120, 8)
+            )
+
+            # Row-click-to-open covers the content region only (not the buttons).
+            open_btn = NSButton.alloc().initWithFrame_(
+                ((0, row_y + 1), (content_w - 120, row_h - 1))
+            )
+            open_btn.setBordered_(False)
+            open_btn.setTitle_("")
+            open_btn.setTransparent_(True)
+            open_btn.setTarget_(self)
+            open_btn.setAction_("open_recent_session:")
+            open_btn.setTag_(idx)
+            open_btn.setEnabled_(session.has_export)
+            open_btn.setAccessibilityLabel_(
+                ("Open " + (session.export_format.upper() if session.export_format else "export"))
+                + " in default app"
+            )
+            container.addSubview_(open_btn)
+
             reveal = NSButton.alloc().initWithFrame_(
-                ((container.frame().size.width - 112, row_y - 1), (52, 20))
+                ((content_w - 112, row_y + (row_h - 20) // 2), (52, 20))
             )
             reveal.setBezelStyle_(NSBezelStyleRounded)
             reveal.setTarget_(self)
@@ -945,7 +989,7 @@ class HRMPopover:
             container.addSubview_(reveal)
 
             delete_btn = NSButton.alloc().initWithFrame_(
-                ((container.frame().size.width - 56, row_y - 1), (52, 20))
+                ((content_w - 56, row_y + (row_h - 20) // 2), (52, 20))
             )
             delete_btn.setBezelStyle_(NSBezelStyleRounded)
             delete_btn.setTarget_(self)
@@ -954,12 +998,59 @@ class HRMPopover:
             _set_dark_button_title(delete_btn, "Delete")
             container.addSubview_(delete_btn)
 
+    def _add_zone_mini_bar(
+        self,
+        container: NSView,
+        session: Any,
+        colors_cfg: dict,
+        frame: tuple,
+    ) -> None:
+        """Draw a compact 4-segment stacked zone-time bar for a session."""
+        (x, y), (w, h) = _rect(frame)
+        track = ColoredRectView.alloc().initWithFrame_(((x, y), (w, h)))
+        track.setColor_(_ns_color(SURFACE_ALT))
+        track.setCornerRadius_(h / 2)
+        container.addSubview_(track)
+
+        cursor = x
+        for zone, frac in recent_zone_fractions(session.zone_times):
+            seg_w = frac * w
+            if seg_w <= 0:
+                continue
+            seg = ColoredRectView.alloc().initWithFrame_(((cursor, y), (seg_w, h)))
+            seg.setColor_(_ns_color(zone_accent(zone, colors_cfg)))
+            seg.setCornerRadius_(h / 2)
+            container.addSubview_(seg)
+            cursor += seg_w
+
     def _update_recent_sessions(self, s: UISnapshot) -> None:
         container = self._recent_sessions_container
         if container is None:
             return
         recent = list(reversed(s.recent_sessions[-RECENT_SESSION_ROWS:]))
-        self._rebuild_recent_sessions(container, recent)
+        colors_cfg = (s.config or {}).get("zone_colors", {})
+        self._rebuild_recent_sessions(container, recent, colors_cfg)
+
+    def open_recent_session_(self, sender: Any) -> None:
+        """Open the selected archived session's export in its default app."""
+
+        try:
+            index = int(sender.tag())
+        except Exception:
+            return
+        recent = list(reversed(self.state.snapshot_for_ui().recent_sessions[-RECENT_SESSION_ROWS:]))
+        if index < 0 or index >= len(recent):
+            return
+        session = recent[index]
+        if not session.export_path:
+            return
+        self._open_url(session.export_path)
+
+    def _open_url(self, url: str) -> None:
+        try:
+            self._open_url_cb(url)
+        except Exception:
+            log.debug("Failed to open export at %s", url, exc_info=True)
 
     def reveal_recent_session_(self, sender: Any) -> None:
         """Reveal the selected archived session export in Finder."""
@@ -1259,6 +1350,27 @@ def _export_feedback(snapshot: UISnapshot) -> tuple[bool, str | None, bool]:
     if snapshot.last_csv_path:
         return False, f"Saved: {snapshot.last_csv_path}", False
     return has_pending_export, None, False
+
+
+def recent_second_line(record: Any) -> str:
+    """Second summary line for a recent-session row (pure)."""
+    avg = record.average_bpm
+    mx = record.session_max
+    transitions = record.zone_transition_count
+    return f"Avg {avg:.0f} \u00b7 Max {mx} \u00b7 {transitions} transitions"
+
+
+def recent_zone_fractions(zone_times: dict[str, float]) -> list[tuple[str, float]]:
+    """Return Z1..Z4 fractions summing to 1 for a stacked zone bar (pure)."""
+    total = sum(zone_times.values())
+    if total <= 0:
+        return [(zone, 0.0) for zone in ZONE_ORDER]
+    return [(zone, zone_times.get(zone, 0.0) / total) for zone in ZONE_ORDER]
+
+
+def _default_open_url(url: str) -> None:
+    """Open a local artifact URL in its default app."""
+    NSWorkspace.sharedWorkspace().openURL_(NSURL.fileURLWithPath_(url))
 
 
 def _make_label(text: str, font: NSFont, color: NSColor, frame: tuple) -> NSTextField:
