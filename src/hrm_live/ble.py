@@ -22,6 +22,7 @@ from bleak.exc import (
 )
 
 from hrm_live.state import AppState, DiscoveredDevice
+from hrm_live.ui.guidance import Guidance, classify_error
 
 log = logging.getLogger(__name__)
 
@@ -191,19 +192,29 @@ def bluetooth_unavailable_message(
         return "No Bluetooth adapter is available."
     if reason == BleakBluetoothNotAvailableReason.NO_BLE_CENTRAL_ROLE:
         return "This Mac cannot act as a Bluetooth LE central."
+    if reason == BleakBluetoothNotAvailableReason.UNKNOWN:
+        return "Bluetooth is unavailable for an unknown reason."
     return "Bluetooth is unavailable. Check Bluetooth and try again."
 
 
+def scan_guidance(exc: Exception) -> Guidance:
+    """Classify a scan failure into user-facing guidance."""
+    return classify_error(exc, context="scan")
+
+
+def connection_guidance(exc: Exception) -> Guidance:
+    """Classify a connection failure into user-facing guidance."""
+    return classify_error(exc, context="connection")
+
+
 def scan_failure_message(exc: Exception) -> str:
-    if isinstance(exc, BleakBluetoothNotAvailableError):
-        return bluetooth_unavailable_message(exc.reason, action="scan again")
-    return "Bluetooth scan failed. Try again."
+    """Return the user-safe scan failure message (guidance text)."""
+    return scan_guidance(exc).display_text
 
 
 def connection_failure_message(exc: Exception) -> str:
-    if isinstance(exc, BleakBluetoothNotAvailableError):
-        return bluetooth_unavailable_message(exc.reason, action="try again")
-    return "Bluetooth connection failed. Retrying."
+    """Return the user-safe connection failure message (guidance text)."""
+    return connection_guidance(exc).display_text
 
 
 async def _sleep_with_stop(stop_event: threading.Event | None, seconds: float) -> None:
@@ -238,33 +249,37 @@ async def ble_loop(
                 connected=False,
                 status="connecting",
                 error=None,
+                recovery="none",
             )
             async with BleakClient(address) as client:
                 log.info("Connected to %s", address)
                 callback = _make_callback(state)
                 await client.start_notify(HEART_RATE_UUID, callback)
-                state.update_connection(connected=True, status="connected", error=None)
+                state.update_connection(
+                    connected=True, status="connected", error=None, recovery="none"
+                )
                 while client.is_connected and (stop_event is None or not stop_event.is_set()):
                     await asyncio.sleep(1)
         except asyncio.CancelledError:
             raise
         except BleakBluetoothNotAvailableError as exc:
-            message = scan_failure_message(exc)
-            log.warning("BLE unavailable: %s", message)
-            state.update_connection(status="error", error=message)
+            g = connection_guidance(exc)
+            log.warning("BLE unavailable: %s", g.display_text)
+            log.debug("Raw BLE unavailable error: %r", exc)
+            state.update_connection(status="error", error=g.display_text, recovery=g.action.value)
         except (TimeoutError, BleakError, OSError) as exc:
-            log.warning("BLE error: %s", exc)
-            state.update_connection(status="error", error=connection_failure_message(exc))
+            g = connection_guidance(exc)
+            log.warning("BLE error: %s", g.display_text)
+            log.debug("Raw BLE error: %r", exc)
+            state.update_connection(status="error", error=g.display_text, recovery=g.action.value)
         except Exception as exc:
+            g = connection_guidance(exc)
             log.exception("Unexpected BLE error: %s", exc)
-            state.update_connection(
-                status="error",
-                error="Bluetooth connection failed. Retrying.",
-            )
+            state.update_connection(status="error", error=g.display_text, recovery=g.action.value)
         finally:
             state.update_connection(connected=False, latest_bpm=None)
             if stop_event is not None and stop_event.is_set():
-                state.update_connection(status="disconnected")
+                state.update_connection(status="disconnected", recovery="none")
                 exit_now = True
             else:
                 state.update_connection(status="reconnecting")
@@ -367,6 +382,7 @@ class BLEManager:
                 connected=False,
                 status="disconnected",
                 error=None,
+                recovery="none",
             )
             return
 
@@ -446,6 +462,7 @@ class BLEManager:
             connected=False,
             status="connecting",
             error=None,
+            recovery="none",
         )
         self.connection_task = self.loop.create_task(  # type: ignore[union-attr]
             self._connection_worker(address, cached_device, generation)
@@ -463,6 +480,7 @@ class BLEManager:
             connected=False,
             status="connecting",
             error=None,
+            recovery="none",
         )
 
         old_task = self.connection_task
@@ -493,6 +511,7 @@ class BLEManager:
             connected=False,
             status="disconnected",
             error=None,
+            recovery="none",
         )
 
     async def _shutdown_async(self) -> None:
@@ -513,6 +532,7 @@ class BLEManager:
             connected=False,
             latest_bpm=None,
             status="disconnected",
+            recovery="none",
         )
         self.loop.stop()  # type: ignore[union-attr]
 
@@ -523,6 +543,7 @@ class BLEManager:
             results=(),
             error=None,
             status="scanning",
+            recovery="none",
             bump_generation=True,
         )
         task = asyncio.current_task()
@@ -540,27 +561,31 @@ class BLEManager:
             )
             async with scanner:
                 await asyncio.sleep(timeout)
-            self.state.update_scan(status="complete", error=None, bump_generation=True)
+            self.state.update_scan(
+                status="complete", error=None, recovery="none", bump_generation=True
+            )
         except asyncio.CancelledError:
-            self.state.update_scan(status="cancelled", bump_generation=True)
+            self.state.update_scan(status="cancelled", recovery="none", bump_generation=True)
             raise
         except BleakBluetoothNotAvailableError as exc:
-            message = scan_failure_message(exc)
-            log.warning("BLE scan unavailable: %s", message)
-            self.state.update_scan(status="error", error=message, bump_generation=True)
-        except (TimeoutError, BleakError, OSError) as exc:
-            log.warning("BLE scan error: %s", exc)
+            g = scan_guidance(exc)
+            log.warning("BLE scan unavailable: %s", g.display_text)
+            log.debug("Raw BLE scan unavailable error: %r", exc)
             self.state.update_scan(
-                status="error",
-                error=scan_failure_message(exc),
-                bump_generation=True,
+                status="error", error=g.display_text, recovery=g.action.value, bump_generation=True
+            )
+        except (TimeoutError, BleakError, OSError) as exc:
+            g = scan_guidance(exc)
+            log.warning("BLE scan error: %s", g.display_text)
+            log.debug("Raw BLE scan error: %r", exc)
+            self.state.update_scan(
+                status="error", error=g.display_text, recovery=g.action.value, bump_generation=True
             )
         except Exception as exc:
+            g = scan_guidance(exc)
             log.exception("Unexpected BLE scan error: %s", exc)
             self.state.update_scan(
-                status="error",
-                error="Bluetooth scan failed. Try again.",
-                bump_generation=True,
+                status="error", error=g.display_text, recovery=g.action.value, bump_generation=True
             )
         finally:
             if self.scan_task is task:
@@ -620,6 +645,7 @@ class BLEManager:
                             connected=True,
                             status="connected",
                             error=None,
+                            recovery="none",
                         )
                         while (
                             client.is_connected
@@ -631,23 +657,31 @@ class BLEManager:
                 except asyncio.CancelledError:
                     raise
                 except BleakBluetoothNotAvailableError as exc:
-                    message = connection_failure_message(exc)
-                    log.warning("BLE unavailable: %s", message)
-                    self.state.update_connection(status="error", error=message)
+                    g = connection_guidance(exc)
+                    log.warning("BLE unavailable: %s", g.display_text)
+                    log.debug("Raw BLE unavailable error: %r", exc)
+                    self.state.update_connection(
+                        status="error", error=g.display_text, recovery=g.action.value
+                    )
                 except (TimeoutError, BleakError, OSError) as exc:
-                    message = connection_failure_message(exc)
-                    log.warning("BLE error: %s", exc)
-                    self.state.update_connection(status="error", error=message)
+                    g = connection_guidance(exc)
+                    log.warning("BLE error: %s", g.display_text)
+                    log.debug("Raw BLE error: %r", exc)
+                    self.state.update_connection(
+                        status="error", error=g.display_text, recovery=g.action.value
+                    )
                 except Exception as exc:
+                    g = connection_guidance(exc)
                     log.exception("Unexpected BLE error: %s", exc)
                     self.state.update_connection(
-                        status="error",
-                        error="Bluetooth connection failed. Retrying.",
+                        status="error", error=g.display_text, recovery=g.action.value
                     )
                 finally:
                     self.state.update_connection(connected=False, latest_bpm=None)
                     if self.stop_event.is_set() or self._shutdown_requested:
-                        self.state.update_connection(status="disconnected", error=None)
+                        self.state.update_connection(
+                            status="disconnected", error=None, recovery="none"
+                        )
                         exit_now = True
                     elif generation != self._connection_generation:
                         generation_changed = True

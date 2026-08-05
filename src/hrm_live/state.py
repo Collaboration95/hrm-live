@@ -72,6 +72,8 @@ class UISnapshot:
     pending_export: tuple[SessionSample, ...]
     recent_sessions: tuple[RecentSessionRecord, ...]
     config: dict[str, Any] | None
+    connection_recovery: str = "none"
+    scan_recovery: str = "none"
 
 
 @dataclass(frozen=True)
@@ -220,9 +222,11 @@ class AppState:
     connected: bool = False
     connection_status: str = "disconnected"
     connection_error: str | None = None
+    connection_recovery: str = "none"
     scan_status: str = "idle"
     scan_results: tuple[DiscoveredDevice, ...] = ()
     scan_error: str | None = None
+    scan_recovery: str = "none"
     scan_generation: int = 0
     ring_buffer: deque[tuple[datetime, int]] = field(default_factory=lambda: deque(maxlen=600))
     session_active: bool = False
@@ -384,6 +388,7 @@ class AppState:
         connected: bool | object = ...,
         status: str | object = ...,
         error: str | None | object = ...,
+        recovery: str | object = ...,
     ) -> None:
         """Atomically update connection fields used by the UI."""
 
@@ -396,6 +401,8 @@ class AppState:
                 self.connection_status = status  # type: ignore[assignment]
             if error is not ...:
                 self.connection_error = error  # type: ignore[assignment]
+            if recovery is not ...:
+                self.connection_recovery = recovery  # type: ignore[assignment]
 
     def update_scan(
         self,
@@ -403,6 +410,7 @@ class AppState:
         status: str | object = ...,
         results: tuple[DiscoveredDevice, ...] | object = ...,
         error: str | None | object = ...,
+        recovery: str | object = ...,
         bump_generation: bool = False,
     ) -> None:
         """Atomically update scan state and optionally bump its revision."""
@@ -414,6 +422,8 @@ class AppState:
                 self.scan_results = results  # type: ignore[assignment]
             if error is not ...:
                 self.scan_error = error  # type: ignore[assignment]
+            if recovery is not ...:
+                self.scan_recovery = recovery  # type: ignore[assignment]
             if bump_generation:
                 self.scan_generation += 1
 
@@ -468,9 +478,11 @@ class AppState:
                 connected=self.connected,
                 connection_status=self.connection_status,
                 connection_error=self.connection_error,
+                connection_recovery=self.connection_recovery,
                 scan_status=self.scan_status,
                 scan_results=tuple(self.scan_results),
                 scan_error=self.scan_error,
+                scan_recovery=self.scan_recovery,
                 scan_generation=self.scan_generation,
                 ring_buffer=tuple(self.ring_buffer),
                 ring_revision=self._ring_revision,

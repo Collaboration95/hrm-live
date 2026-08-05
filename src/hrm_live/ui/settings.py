@@ -25,6 +25,7 @@ from AppKit import (
     NSBezelStyleRounded,
     NSBezierPath,
     NSBox,
+    NSBoxCustom,
     NSBoxSeparator,
     NSButton,
     NSColor,
@@ -43,17 +44,27 @@ from AppKit import (
     NSView,
     NSWindowStyleMaskClosable,
     NSWindowStyleMaskTitled,
+    NSWorkspace,
 )
-from Foundation import NSString
+from Foundation import NSURL, NSString
 
 import hrm_live.config as cfg_mod
 from hrm_live.state import AppState, DiscoveredDevice
+from hrm_live.ui.guidance import (
+    OPEN_BLUETOOTH_URI,
+    OPEN_PRIVACY_URI,
+    RecoveryAction,
+    classify_error,
+)
 from hrm_live.ui.tokens import (
+    CARD_PADDING,
     DIVIDER,
     INLINE_GAP,
     OUTER_PADDING,
+    SURFACE,
     TEXT_SECONDARY,
     TEXT_TERTIARY,
+    status_dot_colour,
 )
 from hrm_live.zones import DEFAULT_COLORS, ZONE_ORDER, validate_zones
 
@@ -194,6 +205,27 @@ class ZonePreviewView(NSView):
         )
 
 
+class DotIndicatorView(NSView):
+    """Small filled-circle status dot used in the Device card header."""
+
+    def initWithFrame_(self, frame: tuple) -> DotIndicatorView:
+        self = objc.super(DotIndicatorView, self).initWithFrame_(frame)
+        if self is not None:
+            self._color = NSColor.clearColor()
+        return self
+
+    def setColor_(self, color: NSColor) -> None:
+        self._color = color
+        self.setNeedsDisplay_(True)
+
+    def drawRect_(self, rect: tuple) -> None:
+        try:
+            self._color.setFill()
+            NSBezierPath.bezierPathWithOvalInRect_(self.bounds()).fill()
+        except Exception:
+            log.exception("Failed to draw status dot")
+
+
 class SettingsWindow:
     """Settings panel controller with grouped form and live validation."""
 
@@ -203,11 +235,16 @@ class SettingsWindow:
         on_scan: Any | None = None,
         on_cancel_scan: Any | None = None,
         on_config_saved: Any | None = None,
+        *,
+        open_system_settings: Any | None = None,
+        on_retry: Any | None = None,
     ) -> None:
         self.state = state
         self.on_scan = on_scan
         self.on_cancel_scan = on_cancel_scan
         self.on_config_saved = on_config_saved
+        self.on_retry = on_retry
+        self._open_system_settings_cb = open_system_settings or _default_system_settings_opener
         self._panel: NSPanel | None = None
         self._scroll_view: NSScrollView | None = None
         self._content_view: NSView | None = None
@@ -316,66 +353,7 @@ class SettingsWindow:
         # SECTION: Device
         # ══════════════════════════════════════════════════════════════
         y = self._add_section_header(content, y, "Device")
-
-        y = self._add_field_row(
-            content, y, "Address:", cfg.get("device_address", ""), "device_address"
-        )
-        y = self._add_field_row(content, y, "Name:", cfg.get("device_name", ""), "device_name")
-
-        y -= INLINE_GAP
-
-        # Scan button + status
-        scan_btn = NSButton.alloc().initWithFrame_(((VALUE_COLUMN_X, y - 28), (160, 28)))
-        scan_btn.setBezelStyle_(NSBezelStyleRounded)
-        scan_btn.setTarget_(self)
-        scan_btn.setAction_("scan_action:")
-        content.addSubview_(scan_btn)
-        self._controls["scan_button"] = scan_btn
-
-        y -= 34
-        scan_status = _make_label(
-            "Click Scan to find nearby HRMs",
-            (VALUE_COLUMN_X, y - 32, 260, 32),
-            font_size=11,
-            color=_ns_color(TEXT_SECONDARY),
-        )
-        content.addSubview_(scan_status)
-        self._controls["scan_status"] = scan_status
-        y -= 40
-
-        # Device picker popup
-        picker_label = _make_label("Discovered:", (OUTER_PADDING, y - 20, 120, 20))
-        content.addSubview_(picker_label)
-
-        popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            _rect((VALUE_COLUMN_X, y - 26, 200, 26)), False
-        )
-        popup.setTarget_(self)
-        popup.setAction_("scan_result_selected:")
-        content.addSubview_(popup)
-        self._controls["scan_results"] = popup
-
-        use_btn = NSButton.alloc().initWithFrame_(_rect((VALUE_COLUMN_X + 210, y - 26, 110, 26)))
-        use_btn.setBezelStyle_(NSBezelStyleRounded)
-        use_btn.setTitle_("Use Device")
-        use_btn.setTarget_(self)
-        use_btn.setAction_("use_selected:")
-        content.addSubview_(use_btn)
-        self._controls["use_selected"] = use_btn
-        y -= 36
-
-        # Connection status
-        conn_label = _make_label("Status:", (OUTER_PADDING, y - 20, 120, 20))
-        content.addSubview_(conn_label)
-        conn_status = _make_label(
-            "Not connected",
-            (VALUE_COLUMN_X, y - 20, 260, 20),
-            font_size=11,
-            color=_ns_color(TEXT_SECONDARY),
-        )
-        content.addSubview_(conn_status)
-        self._controls["connection_status"] = conn_status
-        y -= 36
+        y = self._add_device_card(content, y, cfg)
 
         # ══════════════════════════════════════════════════════════════
         # SECTION: Heart Rate
@@ -487,6 +465,159 @@ class SettingsWindow:
         self._controls[key] = field
 
         return y - 30
+
+    def _add_device_card(self, parent: NSView, y: float, cfg: dict) -> float:
+        """Build the one compact Device setup card and return the next y.
+
+        Rows (8 pt grid): status header with dot, scan button + status,
+        Discovered picker + Use Device, read-only Address, editable Name,
+        plus contextual recovery buttons that appear only on failure.
+        The address field is informational: it is written only by
+        "Use Device" (or config load), never hand-edited.
+        """
+        card_x = OUTER_PADDING
+        card_w = PANEL_WIDTH - 2 * OUTER_PADDING - 10
+        inner_x = card_x + CARD_PADDING
+        inner_w = card_w - 2 * CARD_PADDING
+        label_w = 120
+        value_x = inner_x + label_w
+
+        # Card height (8 pt multiples): 12 + rows + gaps + 12
+        header_h = 20
+        recovery_h = 24
+        field_h = 22
+        row_gap = INLINE_GAP
+        card_h = (
+            CARD_PADDING
+            + header_h
+            + recovery_h
+            + row_gap
+            + field_h
+            + field_h
+            + row_gap
+            + 28  # scan button
+            + 16  # scan status line
+            + recovery_h
+            + row_gap
+            + 26  # picker row
+            + CARD_PADDING
+        )
+
+        card = NSBox.alloc().initWithFrame_(((card_x, y - card_h), (card_w, card_h)))
+        card.setBoxType_(NSBoxCustom)
+        card.setBorderType_(0)
+        card.setFillColor_(_ns_color(SURFACE))
+        card.setBorderColor_(_ns_color(DIVIDER))
+        card.setBorderWidth_(1.0)
+        card.setCornerRadius_(8.0)
+        parent.addSubview_(card)
+
+        cy = y - CARD_PADDING
+
+        # ── Header: status dot + connection status ────────────────────
+        dot = DotIndicatorView.alloc().initWithFrame_(((inner_x, cy - 10), (10, 10)))
+        dot.setColor_(_ns_color(status_dot_colour(self.state.snapshot_for_ui().connection_status)))
+        parent.addSubview_(dot)
+        self._controls["connection_status_dot"] = dot
+
+        status_label = _make_label(
+            self._connection_status_text(),
+            (inner_x + 18, cy - 18, inner_w - 18, 18),
+            font_size=11,
+            color=_ns_color(TEXT_SECONDARY),
+        )
+        parent.addSubview_(status_label)
+        self._controls["connection_status"] = status_label
+        cy -= header_h
+
+        # ── Connection recovery button (hidden unless failure) ────────
+        conn_recovery = self._make_recovery_button(
+            parent, (inner_x, cy - recovery_h, 190, recovery_h), tag=1
+        )
+        self._controls["connection_recovery_button"] = conn_recovery
+        cy -= recovery_h + row_gap
+
+        # ── Read-only Address row ─────────────────────────────────────
+        addr_lbl = _make_label("Address:", (inner_x, cy - 20, label_w, 20), font_size=11)
+        parent.addSubview_(addr_lbl)
+        addr_field = NSTextField.alloc().initWithFrame_(((value_x, cy - field_h), (180, field_h)))
+        addr_field.setStringValue_(cfg.get("device_address", ""))
+        addr_field.setEditable_(False)
+        addr_field.setSelectable_(True)
+        parent.addSubview_(addr_field)
+        self._controls["device_address"] = addr_field
+        cy -= field_h
+
+        # ── Editable Name row ─────────────────────────────────────────
+        name_lbl = _make_label("Name:", (inner_x, cy - 20, label_w, 20), font_size=11)
+        parent.addSubview_(name_lbl)
+        name_field = NSTextField.alloc().initWithFrame_(((value_x, cy - field_h), (180, field_h)))
+        name_field.setStringValue_(cfg.get("device_name", ""))
+        if self._delegate is not None:
+            name_field.setDelegate_(self._delegate)
+        parent.addSubview_(name_field)
+        self._controls["device_name"] = name_field
+        cy -= field_h + row_gap
+
+        # ── Scan button + status ──────────────────────────────────────
+        scan_btn = NSButton.alloc().initWithFrame_(((inner_x, cy - 28), (160, 28)))
+        scan_btn.setBezelStyle_(NSBezelStyleRounded)
+        scan_btn.setTarget_(self)
+        scan_btn.setAction_("scan_action:")
+        parent.addSubview_(scan_btn)
+        self._controls["scan_button"] = scan_btn
+        cy -= 34
+
+        scan_status = _make_label(
+            "Click Scan to find nearby HRMs",
+            (inner_x, cy - 16, inner_w, 16),
+            font_size=11,
+            color=_ns_color(TEXT_SECONDARY),
+        )
+        parent.addSubview_(scan_status)
+        self._controls["scan_status"] = scan_status
+        cy -= 22
+
+        # ── Scan recovery button (hidden unless failure) ──────────────
+        scan_recovery = self._make_recovery_button(
+            parent, (inner_x, cy - recovery_h, 190, recovery_h), tag=0
+        )
+        self._controls["scan_recovery_button"] = scan_recovery
+        cy -= recovery_h + row_gap
+
+        # ── Discovered picker + Use Device ────────────────────────────
+        picker_label = _make_label("Discovered:", (inner_x, cy - 20, label_w, 20), font_size=11)
+        parent.addSubview_(picker_label)
+
+        popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            _rect((value_x, cy - 26, 150, 26)), False
+        )
+        popup.setTarget_(self)
+        popup.setAction_("scan_result_selected:")
+        parent.addSubview_(popup)
+        self._controls["scan_results"] = popup
+
+        use_btn = NSButton.alloc().initWithFrame_(_rect((value_x + 158, cy - 26, 90, 26)))
+        use_btn.setBezelStyle_(NSBezelStyleRounded)
+        use_btn.setTitle_("Use Device")
+        use_btn.setTarget_(self)
+        use_btn.setAction_("use_selected:")
+        parent.addSubview_(use_btn)
+        self._controls["use_selected"] = use_btn
+        cy -= 26
+
+        return y - card_h - INLINE_GAP
+
+    def _make_recovery_button(self, parent: NSView, frame: tuple, *, tag: int) -> NSButton:
+        """Create a hidden recovery button; the sync pass reveals it on failure."""
+        button = NSButton.alloc().initWithFrame_(_rect(frame))
+        button.setBezelStyle_(NSBezelStyleRounded)
+        button.setTarget_(self)
+        button.setAction_("recovery_action:")
+        button.setTag_(tag)
+        button.setHidden_(True)
+        parent.addSubview_(button)
+        return button
 
     def _add_zones_section(self, parent: NSView, y: float, cfg: dict) -> float:
         """Add zone boundary percent fields with inline validation labels."""
@@ -684,7 +815,7 @@ class SettingsWindow:
             self.refresh_from_state()
         except Exception as exc:
             log.exception("Scan action failed")
-            self._show_error(f"Scan failed: {exc}")
+            self._show_error(classify_error(exc, context="scan").display_text)
 
     def scan_result_selected_(self, sender: Any) -> None:
         try:
@@ -702,9 +833,9 @@ class SettingsWindow:
             self._set_text("device_address", result.address)
             self._set_text("device_name", result.name)
             self._mark_dirty()
-        except Exception as exc:
+        except Exception:
             log.exception("Failed to apply selected scan result")
-            self._show_error(f"Failed to use the selected device: {exc}")
+            self._show_error("Failed to use the selected device. Try scanning again.")
 
     def color_well_changed_(self, sender: NSColorWell) -> None:
         """Sync hex field when colour well changes."""
@@ -882,9 +1013,66 @@ class SettingsWindow:
         self._set_text("scan_button", self._scan_button_title())
         self._set_text("scan_status", self._scan_status_text())
         self._refresh_scan_popup()
+        self._sync_recovery_button("scan")
 
     def _sync_connection_status(self) -> None:
         self._set_text("connection_status", self._connection_status_text())
+        dot = self._controls.get("connection_status_dot")
+        if dot is not None and hasattr(dot, "setColor_"):
+            try:
+                dot.setColor_(
+                    _ns_color(status_dot_colour(self.state.snapshot_for_ui().connection_status))
+                )
+            except Exception:
+                log.debug("Failed to update connection status dot", exc_info=True)
+        self._sync_recovery_button("connection")
+
+    _RECOVERY_BUTTON_TITLES = {
+        RecoveryAction.OPEN_PRIVACY.value: "Open Privacy & Security",
+        RecoveryAction.OPEN_BLUETOOTH.value: "Open Bluetooth Settings",
+        RecoveryAction.RETRY.value: "Retry",
+    }
+
+    def _sync_recovery_button(self, context: str) -> None:
+        """Show a single contextual recovery button, or hide it when none applies."""
+        key = "scan_recovery_button" if context == "scan" else "connection_recovery_button"
+        button = self._controls.get(key)
+        if button is None:
+            return
+        snapshot = self.state.snapshot_for_ui()
+        action = snapshot.scan_recovery if context == "scan" else snapshot.connection_recovery
+        title = self._RECOVERY_BUTTON_TITLES.get(action)
+        if title is None:
+            button.setHidden_(True)
+            return
+        button.setHidden_(False)
+        button.setTitle_(title)
+        button.setEnabled_(True)
+
+    def recovery_action_(self, sender: Any) -> None:
+        """Handle a contextual recovery button: open a pane or retry."""
+        try:
+            tag = int(sender.tag())
+        except Exception:
+            return
+        snapshot = self.state.snapshot_for_ui()
+        action = snapshot.scan_recovery if tag == 0 else snapshot.connection_recovery
+        if action == RecoveryAction.OPEN_PRIVACY.value:
+            self._open_system_settings(OPEN_PRIVACY_URI)
+        elif action == RecoveryAction.OPEN_BLUETOOTH.value:
+            self._open_system_settings(OPEN_BLUETOOTH_URI)
+        elif action == RecoveryAction.RETRY.value:
+            if tag == 0:
+                if self.on_scan is not None:
+                    self.on_scan()
+            elif self.on_retry is not None:
+                self.on_retry()
+
+    def _open_system_settings(self, uri: str) -> None:
+        try:
+            self._open_system_settings_cb(uri)
+        except Exception:
+            log.debug("Failed to open System Settings at %s", uri, exc_info=True)
 
     def _refresh_scan_popup(self) -> None:
         popup = self._controls.get("scan_results")
@@ -1075,6 +1263,11 @@ class SettingsWindow:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+
+def _default_system_settings_opener(uri: str) -> None:
+    """Open a System Settings destination via the system workspace."""
+    NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(uri))
 
 
 def _make_label(

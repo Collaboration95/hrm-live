@@ -81,6 +81,7 @@ class HRMBarApp(rumps.App):
             on_scan=self._start_scan,
             on_cancel_scan=self._cancel_scan,
             on_config_saved=self._settings_saved,
+            on_retry=self._retry_connection,
         )
         self.popover.on_settings = self.settings.show
 
@@ -260,6 +261,16 @@ class HRMBarApp(rumps.App):
     def _cancel_scan(self) -> None:
         if self.ble_manager is not None:
             self.ble_manager.cancel_scan()
+
+    def _retry_connection(self) -> None:
+        """Re-issue a connect to the configured device (recovery Retry)."""
+        if self.ble_manager is None:
+            return
+        address = (self.state.snapshot_for_ui().config or {}).get("device_address", "")
+        if not address:
+            return
+        cached = self.ble_manager.get_cached_device(address)
+        self.ble_manager.connect(address, cached_device=cached)
 
     def _settings_saved(self, old_config: dict, new_config: dict) -> None:
         """React to a successful settings save."""
