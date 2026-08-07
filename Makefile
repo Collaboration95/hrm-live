@@ -1,6 +1,5 @@
 PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
-MPLCONFIGDIR ?= /tmp/hrm-live-matplotlib
 APP_BUNDLE := dist/HRM Live.app
 COMPILE_PATHS := src tests scripts setup.py
 
@@ -68,8 +67,7 @@ icon:
 	$(PYTHON) scripts/build_icon.py
 
 build: icon
-	@mkdir -p "$(MPLCONFIGDIR)"
-	MPLCONFIGDIR="$(MPLCONFIGDIR)" $(PYTHON) setup.py py2app
+	$(PYTHON) setup.py py2app
 
 verify-bundle:
 	@test -d "$(APP_BUNDLE)" || (printf "Missing app bundle: $(APP_BUNDLE)\n" >&2; exit 1)

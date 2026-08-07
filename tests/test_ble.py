@@ -140,9 +140,11 @@ def test_bluetooth_unavailable_messages_are_concise() -> None:
         BleakBluetoothNotAvailableReason.POWERED_OFF,
         action="scan again",
     )
-    assert scan_failure_message(RuntimeError("boom")) == "Bluetooth scan failed. Try again."
-    assert (
-        connection_failure_message(RuntimeError("boom")) == "Bluetooth connection failed. Retrying."
+    assert scan_failure_message(RuntimeError("boom")) == (
+        "Something unexpected went wrong. Please try again."
+    )
+    assert connection_failure_message(RuntimeError("boom")) == (
+        "Something unexpected went wrong. Please try again."
     )
 
 

@@ -25,23 +25,21 @@ from hrm_live.ble import BLEManager, stop_ble_background
 from hrm_live.state import AppState
 from hrm_live.ui.popover import HRMPopover
 from hrm_live.ui.settings import SettingsWindow
-from hrm_live.ui.tokens import menu_accessibility_label, status_dot_colour, zone_accent
+from hrm_live.ui.tokens import (
+    menu_accessibility_label,
+    menu_dot_char,
+    menu_dot_range,
+    menu_title,
+    menu_tooltip,
+    status_dot_colour,
+    zone_accent,
+)
 from hrm_live.zones import get_zone, zone_label
 
 log = logging.getLogger(__name__)
 
-DISCONNECTED_TITLE = "♡ ---"
+DISCONNECTED_TITLE = menu_title(None, "disconnected")
 UI_REFRESH_SECONDS = 1.0
-
-# ── Status dot characters (visible without colour) ───────────────────────
-
-DOT_CHARS = {
-    "connected": "●",  # Filled circle
-    "connecting": "◌",  # Dotted circle (scanning/connecting)
-    "reconnecting": "◌",  # Dotted circle
-    "disconnected": "○",  # Open circle
-    "error": "○",  # Open circle (changes colour)
-}
 
 
 class _StatusButtonTarget(NSObject):
@@ -81,6 +79,7 @@ class HRMBarApp(rumps.App):
             on_scan=self._start_scan,
             on_cancel_scan=self._cancel_scan,
             on_config_saved=self._settings_saved,
+            on_retry=self._retry_connection,
         )
         self.popover.on_settings = self.settings.show
 
@@ -103,31 +102,33 @@ class HRMBarApp(rumps.App):
         zone = self._current_zone(s.latest_bpm, s.config) if s.latest_bpm is not None else "Z1"
         colors_cfg = (s.config or {}).get("zone_colors", {})
         dot_color = status_dot_colour(s.connection_status)
-        dot_char = DOT_CHARS.get(s.connection_status, "○")
+        dot_char = menu_dot_char(s.connection_status)
 
         # Build title: BPM text in system primary colour, zone dot in zone/status colour
         if s.connected and s.latest_bpm is not None:
             zone_col = zone_accent(zone, colors_cfg)
             z_label = zone_label(zone)
-            text_part = f"♥ {s.latest_bpm} bpm {z_label}"
+            text_part = menu_title(s.latest_bpm, "connected", zone=zone, zone_name=z_label)
         else:
             zone_col = dot_color
-            text_part = DISCONNECTED_TITLE
+            text_part = menu_title(None, s.connection_status)
 
         self._set_dual_colour_title(text_part, dot_char, zone_col if s.connected else dot_color)
 
         log.debug("Menu tick: status=%s", s.connection_status)
 
-        # Accessibility
+        # Accessibility + privacy-safe tooltip
         a11y_label = menu_accessibility_label(
             s.latest_bpm if s.connected else None,
             zone,
             zone_label(zone),
             s.connection_status,
         )
+        device_name = (s.config or {}).get("device_name", "")
         button = self._status_item_button()
         if button:
             button.setAccessibilityLabel_(a11y_label)
+            button.setToolTip_(menu_tooltip(device_name, s.connection_status))
 
         # Refresh popover content if it's open
         if self.popover.is_shown:
@@ -189,8 +190,8 @@ class HRMBarApp(rumps.App):
             attributed = NSMutableAttributedString.alloc().initWithString_attributes_(
                 full, text_attrs
             )
-            # Apply dot colour to the last character (the dot)
-            dot_range = (len(full) - 1, 1)
+            # Apply dot colour to the trailing status dot
+            dot_range = menu_dot_range(full)
             attributed.addAttributes_range_(dot_attrs, dot_range)
 
             button.setAttributedTitle_(attributed)
@@ -261,6 +262,16 @@ class HRMBarApp(rumps.App):
         if self.ble_manager is not None:
             self.ble_manager.cancel_scan()
 
+    def _retry_connection(self) -> None:
+        """Re-issue a connect to the configured device (recovery Retry)."""
+        if self.ble_manager is None:
+            return
+        address = (self.state.snapshot_for_ui().config or {}).get("device_address", "")
+        if not address:
+            return
+        cached = self.ble_manager.get_cached_device(address)
+        self.ble_manager.connect(address, cached_device=cached)
+
     def _settings_saved(self, old_config: dict, new_config: dict) -> None:
         """React to a successful settings save."""
 
@@ -301,6 +312,7 @@ class HRMBarApp(rumps.App):
 
         if self.timer is not None:
             self.timer.stop()
+        self.popover.teardown()
         rumps.events.before_start.unregister(self._configure_status_item)
         if manager is not None:
             stop_ble_background(manager)

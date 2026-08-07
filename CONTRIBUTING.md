@@ -6,7 +6,7 @@ constraints deserve small, well-tested changes.
 
 ## Before opening a pull request
 
-1. Use macOS and Python 3.11 or newer.
+1. Use macOS and Python 3.14 or newer (the project requires Python 3.14).
 2. Create the development environment and install all local checks:
 
    ```bash

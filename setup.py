@@ -52,7 +52,6 @@ OPTIONS = {
     "packages": [
         "rumps",
         "bleak",
-        "matplotlib",
         "hrm_live",
         "hrm_live.ui",
     ],
@@ -60,7 +59,6 @@ OPTIONS = {
         "AppKit",
         "CoreBluetooth",
         "Foundation",
-        "matplotlib.backends.backend_agg",
     ],
     "excludes": [
         "PyObjCTest",
@@ -69,7 +67,6 @@ OPTIONS = {
         "tkinter",
         "PIL",
     ],
-    "matplotlib_backends": ["agg"],
     "site_packages": True,
     "iconfile": "assets/HRMLive.icns",
     "emulate_shell_environment": True,

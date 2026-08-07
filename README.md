@@ -11,9 +11,14 @@ with a zone gauge, HR graph, and session recording.
   graph, session stats, and start/stop controls
 - **BLE HRM support** for standard GATT Heart Rate Measurement (0x2A37)
 - **4-zone model** with configurable boundaries and colors
+- **Live zone preview** in Settings that updates the ramp and BPM cutoffs as
+  you edit colors, boundaries, or max HR
+- **Unsaved-changes protection** in Settings (discard confirmation and a
+  confirmed Reset to Defaults)
 - **Session recording** with user-selected CSV and JSON export
 - **Saved session history** for reopening recent sessions and exported files
 - **Configurable settings** (max HR, zone boundaries, colors, graph window)
+- **Native AppKit rendering** — no matplotlib/numpy dependency (app ≈ 28 MB)
 
 ## Requirements
 
@@ -112,7 +117,7 @@ With coverage:
 make coverage
 ```
 
-The current coverage gate is 60%, with the suite measuring ~76% locally (164 tests).
+The current coverage gate is 60%, with the suite measuring ~77% locally (236 tests).
 
 ## Configuration
 
@@ -122,7 +127,7 @@ Default settings:
 - Device address: empty (must be set before BLE will connect)
 - Max HR: 190 bpm
 - Zone boundaries: Z1 < 60%, Z2 < 75%, Z3 < 88%, Z4 ≥ 88%
-- Zone colors: Z1 grey, Z2 green, Z3 orange, Z4 red
+- Zone colors: Z1 grey, Z2 green, Z3 orange, Z4 pink
 
 ## Session Data
 
@@ -148,6 +153,23 @@ timestamp,bpm,zone
 2025-08-10T07:34:12,142,Z3
 ```
 
+## Screenshots
+
+Light-mode release captures live in [`docs/screenshots/`](docs/screenshots/):
+
+- [`dashboard-light.png`](docs/screenshots/dashboard-light.png) — the dashboard
+  popover: hero gauge with live BPM, 16:9 AppKit trend graph, session card,
+  recent sessions with zone-time bars, and the action area.
+- [`settings-zones.png`](docs/screenshots/settings-zones.png) — Settings zones
+  section: boundary percent fields, native `NSColorWell`s + hex fields, and the
+  live zone-ramp preview with BPM cutoffs.
+- [`settings-device.png`](docs/screenshots/settings-device.png) — the compact
+  Device setup card: connection status, Scan button + live result count,
+  Discovered picker + Use Device, read-only Address, and editable Name.
+
+Each screenshot also has a `-1x` variant. Regenerate them with
+`python scripts/capture_screenshots.py`.
+
 ## GitHub Workflow
 
 The repository uses GitHub-native labels and a small milestone set.
@@ -171,19 +193,19 @@ src/
     state.py        # Locked AppState and immutable snapshots
     config.py       # Config load/save/validate
     zones.py        # Zone calculation helpers
-    session.py      # Session lifecycle and explicit CSV export
+    session.py      # Session lifecycle and explicit CSV + JSON export
     ble.py          # BLE HR parsing and connection loop
     ui/
       menubar.py    # Status item and shutdown routing
       popover.py    # Dashboard and save-panel orchestration
-      graph.py      # HR graph rendering (matplotlib Agg)
+      graph.py      # HR graph rendering (offscreen AppKit -> PNG)
       settings.py   # Settings window
+      tokens.py     # Semantic design tokens (colors, type, spacing)
 tests/
   ...
 docs/
   RELEASE_CHECKLIST.md   # Release-candidate sign-off and evidence record
   FEATURE_ROADMAP.md     # Product roadmap and feature milestones
-  ISSUE-*.md             # Plans for in-flight UI/UX issues
 ```
 
 ## Privacy And Limitations
@@ -211,18 +233,9 @@ stored in this repository.
 
 MIT
 
-## Feature Tracking
+## Release Tracking
 
-Release tracker, local implementation state:
-
-1. Dashboard-first status item interaction: implemented in code; manual
-   real-UI verification still pending.
-2. Finder-style CSV saving: implemented and covered by injected-path tests;
-   manual Desktop/spreadsheet verification still pending.
-3. Single guarded quit path: implemented in code; manual real-UI verification
-   still pending for all BLE states.
-4. Native `src/hrm_live` package layout and focused comments: implemented and
-   covered by local quality checks.
-
-This is not a released build until the checklist in
-`docs/RELEASE_CHECKLIST.md` is complete.
+Implementation status and the manual AppKit, hardware, and distribution
+checks for the current release candidate are tracked in
+`docs/RELEASE_CHECKLIST.md`. This is not a released build until that checklist
+is complete.
