@@ -3,10 +3,12 @@
 from collections import deque
 from datetime import UTC, datetime, timedelta
 
+from hrm_live.ui import tokens
 from hrm_live.ui.graph import (
     _chart_y_limits,
     _elapsed_tick_offsets,
     _format_elapsed_tick,
+    _resolve_chart_colors,
     render_graph,
     summarize_heart_rate,
 )
@@ -71,6 +73,30 @@ def test_render_partial_zones_uses_defaults() -> None:
         assert isinstance(result, bytes)
 
 
+def test_resolve_chart_colors_defaults_to_tokens() -> None:
+    """Without a config, the graph uses the dashboard's token palette."""
+    assert _resolve_chart_colors(None) == tokens.ZONE_COLORS_DEFAULT
+    assert _resolve_chart_colors({}) == tokens.ZONE_COLORS_DEFAULT
+
+
+def test_resolve_chart_colors_preserves_explicit_user_colors() -> None:
+    custom = {"Z1": "#111111", "Z2": "#222222", "Z3": "#333333", "Z4": "#444444"}
+    assert _resolve_chart_colors(custom) == custom
+
+
+def test_resolve_chart_colors_keeps_explicit_color_equal_to_default() -> None:
+    """A user choice that happens to equal a token default is not dropped."""
+    explicit_default = dict(tokens.ZONE_COLORS_DEFAULT)
+    assert _resolve_chart_colors(explicit_default) == tokens.ZONE_COLORS_DEFAULT
+
+
+def test_resolve_chart_colors_merges_partial_over_tokens() -> None:
+    custom = {"Z2": "#ABCDEF"}
+    resolved = _resolve_chart_colors(custom)
+    assert resolved["Z2"] == "#ABCDEF"
+    assert resolved["Z1"] == tokens.ZONE_COLORS_DEFAULT["Z1"]
+
+
 def test_render_custom_colors() -> None:
     rb = _make_ring_buffer([120])
     colors = {"Z1": "#ffffff", "Z2": "#000000", "Z3": "#ff0000", "Z4": "#00ff00"}
@@ -129,4 +155,4 @@ def test_render_line_changes_color_across_zones(monkeypatch) -> None:
     )
 
     assert result is not None
-    assert calls == ["#F2D33B", "#FF8A3D", "#ED3C70"]
+    assert calls == ["#34C759", "#FF9F0A", "#FF375F"]

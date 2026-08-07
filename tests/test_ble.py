@@ -29,7 +29,7 @@ from hrm_live.ble import (
     start_ble_background,
     stop_ble_background,
 )
-from hrm_live.state import AppState, DiscoveredDevice
+from hrm_live.state import RING_BUFFER_CAPACITY, AppState, DiscoveredDevice
 
 # ── Parsing ─────────────────────────────────────────────────────────────
 
@@ -189,9 +189,9 @@ def test_callback_multiple_samples() -> None:
 def test_callback_ring_buffer_capped() -> None:
     state = AppState()
     cb = _make_callback(state)
-    for i in range(1000):
+    for i in range(4 * RING_BUFFER_CAPACITY):
         cb(0, bytearray([0x00, 100 + (i % 50)]))
-    assert len(state.ring_buffer) == 600
+    assert len(state.ring_buffer) == RING_BUFFER_CAPACITY
 
 
 # ── Scan controller ─────────────────────────────────────────────────────
