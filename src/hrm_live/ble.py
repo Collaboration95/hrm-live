@@ -34,6 +34,16 @@ RECONNECT_DELAY_SECONDS = 3.0
 _UUID_PARSE_FAIL = object()
 
 
+def _redact_address(address: str) -> str:
+    """Return a short, log-safe fragment of a BLE address.
+
+    Full BLE addresses must never appear in logs by default (AGENTS.md);
+    callers log this fragment instead.
+    """
+
+    return address[:8]
+
+
 @dataclass
 class _ScanRecord:
     """Mutable controller-owned cache entry for a discovered device."""
@@ -217,60 +227,6 @@ async def _sleep_with_stop(stop_event: threading.Event | None, seconds: float) -
         if remaining <= 0:
             return
         await asyncio.sleep(min(0.1, remaining))
-
-
-async def ble_loop(
-    state: AppState,
-    address: str,
-    stop_event: threading.Event | None = None,
-) -> None:
-    """Legacy connection loop retained for tests and compatibility."""
-
-    if not address:
-        log.info("No device address configured; BLE loop idle.")
-        return
-
-    while stop_event is None or not stop_event.is_set():
-        exit_now = False
-        try:
-            state.update_connection(
-                latest_bpm=None,
-                connected=False,
-                status="connecting",
-                error=None,
-            )
-            async with BleakClient(address) as client:
-                log.info("Connected to %s", address)
-                callback = _make_callback(state)
-                await client.start_notify(HEART_RATE_UUID, callback)
-                state.update_connection(connected=True, status="connected", error=None)
-                while client.is_connected and (stop_event is None or not stop_event.is_set()):
-                    await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            raise
-        except BleakBluetoothNotAvailableError as exc:
-            message = scan_failure_message(exc)
-            log.warning("BLE unavailable: %s", message)
-            state.update_connection(status="error", error=message)
-        except (TimeoutError, BleakError, OSError) as exc:
-            log.warning("BLE error: %s", exc)
-            state.update_connection(status="error", error=connection_failure_message(exc))
-        except Exception as exc:
-            log.exception("Unexpected BLE error: %s", exc)
-            state.update_connection(
-                status="error",
-                error="Bluetooth connection failed. Retrying.",
-            )
-        finally:
-            state.update_connection(connected=False, latest_bpm=None)
-            if stop_event is not None and stop_event.is_set():
-                state.update_connection(status="disconnected")
-                exit_now = True
-            else:
-                state.update_connection(status="reconnecting")
-                await _sleep_with_stop(stop_event, RECONNECT_DELAY_SECONDS)
-        if exit_now:
-            return
 
 
 class BLEManager:
@@ -613,7 +569,7 @@ class BLEManager:
                 try:
                     client_target: BLEDevice | str = cached_device or address
                     async with BleakClient(client_target) as client:
-                        log.info("Connected to %s", address)
+                        log.info("Connected to %s", _redact_address(address))
                         callback = _make_callback(self.state)
                         await client.start_notify(HEART_RATE_UUID, callback)
                         self.state.update_connection(
