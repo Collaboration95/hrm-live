@@ -5,9 +5,7 @@ via mock/monkeypatch.  No real BleakClient is ever instantiated.
 """
 
 import asyncio
-import threading
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, patch
 
@@ -65,6 +63,17 @@ def test_parse_16bit_bpm_high() -> None:
 
 def test_parse_empty_payload() -> None:
     assert parse_heart_rate(bytearray()) is None
+
+
+def test_redact_address_truncates_to_prefix() -> None:
+    """Connection logs must never contain a full BLE address."""
+    import hrm_live.ble as ble_mod
+
+    assert ble_mod._redact_address("AA:BB:CC:DD:EE:FF") == "AA:BB:CC"
+    assert ble_mod._redact_address("74:70:56:90:11:22") == "74:70:56"
+
+    full = "AA:BB:CC:DD:EE:FF"
+    assert full not in ble_mod._redact_address(full)
 
 
 def test_parse_too_short_8bit() -> None:
@@ -222,45 +231,39 @@ async def test_scan_cancel_sets_cancelled_without_touching_connection() -> None:
     assert state.connection_status == "connected"
 
 
-# ── BLE loop mock tests ─────────────────────────────────────────────────
+# ── BLE connection loop mock tests ─────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_ble_loop_no_address() -> None:
-    """BLE loop returns immediately when address is empty."""
-    import hrm_live.ble as ble_mod
-
+def test_manager_no_address_does_not_connect() -> None:
+    """Manager never starts a connection when the address is empty."""
     state = AppState()
-    await ble_mod.ble_loop(state, "")
-    # Should not crash, should not connect
+    mgr = start_ble_background(state, "")
+    try:
+        assert mgr.ready_event.wait(timeout=2)
+        import time
+
+        time.sleep(0.1)
+        assert mgr.connection_task is None
+        assert state.connection_status == "disconnected"
+    finally:
+        stop_ble_background(mgr)
 
 
-@pytest.mark.asyncio
-async def test_ble_loop_connect_and_notify() -> None:
-    """Test BLE loop with a mocked BleakClient and stop via cancellation."""
-    import hrm_live.ble as ble_mod
-
+def test_manager_connect_subscribes_to_notifications() -> None:
+    """Manager connection worker subscribes to heart-rate notifications."""
     state = AppState()
-    state.config = {
-        "max_hr": 190,
-        "zones": {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88},
-    }
 
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.is_connected = True
-    mock_client.address = "AA:BB:CC:DD:EE:FF"
-
-    stop_event = threading.Event()
 
     with patch("hrm_live.ble.BleakClient", return_value=mock_client):
-        task = asyncio.create_task(ble_mod.ble_loop(state, "AA:BB:CC:DD:EE:FF", stop_event))
-        await asyncio.sleep(0.1)
-        stop_event.set()
-        await asyncio.sleep(0.05)
-        task.cancel()
-        with suppress(asyncio.CancelledError, StopIteration):
-            await task
+        mgr = start_ble_background(state, "AA:BB:CC:DD:EE:FF")
+        assert mgr.ready_event.wait(timeout=2)
+        import time
+
+        time.sleep(0.2)
+        stop_ble_background(mgr, join_timeout=2)
 
     # Should have connected and set up notification
     assert mock_client.start_notify.called
@@ -337,8 +340,8 @@ def test_stop_ble_background_none() -> None:
     stop_ble_background(None)  # should not raise
 
 
-def test_ble_loop_stops_on_stop_event() -> None:
-    """The BLE loop returns when stop_event is set (not via cancellation)."""
+def test_manager_stops_on_stop_event() -> None:
+    """The manager's connection loop exits when stop_event is set."""
     state = AppState()
     # Create an async mock client that keeps is_connected=True
     mock_client = AsyncMock()
@@ -351,7 +354,7 @@ def test_ble_loop_stops_on_stop_event() -> None:
 
         time.sleep(0.3)
 
-        # Stop should cause ble_loop to exit on its own
+        # Stop should cause the connection loop to exit on its own
         stop_ble_background(mgr, join_timeout=3)
         assert mgr.stop_event.is_set()
         assert not mgr.thread.is_alive()
