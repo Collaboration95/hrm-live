@@ -18,6 +18,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from hrm_live import io_worker
 from hrm_live.zones import get_zone
 
 log = logging.getLogger(__name__)
@@ -556,20 +557,24 @@ class AppState:
                 return
 
     def _persist_recent_sessions_locked(self) -> None:
+        """Queue a best-effort archive write on the I/O worker thread.
+
+        The serialized payload is built under the lock, but the actual file
+        write happens off the UI thread so the dashboard never blocks on disk
+        (and the BLE producer never waits on the RLock for it).
+        """
+
         path = self._recent_sessions_path
         if path is None:
             return
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps([session.to_dict() for session in self._recent_sessions], indent=2)
-                + "\n",
-                encoding="utf-8",
-            )
-            tmp.replace(path)
-        except Exception:
-            log.exception("Failed to persist recent sessions to %s", path)
+        payload = (
+            json.dumps([session.to_dict() for session in self._recent_sessions], indent=2) + "\n"
+        )
+        io_worker.write_text_atomic_async(
+            payload,
+            path,
+            context=f"recent sessions to {path}",
+        )
 
 
 def _copy_config(config: dict[str, Any] | None) -> dict[str, Any] | None:

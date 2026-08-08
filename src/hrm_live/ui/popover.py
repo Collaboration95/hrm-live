@@ -43,9 +43,10 @@ from AppKit import (
     NSViewController,
     NSWorkspace,
 )
-from Foundation import NSURL, NSString
+from Foundation import NSURL, NSOperationQueue, NSString
 
 import hrm_live.config as cfg_mod
+import hrm_live.io_worker as io_worker
 import hrm_live.session as sess_mod
 from hrm_live.state import AppState, ExportSnapshot, UISnapshot
 from hrm_live.ui.graph import render_graph, summarize_heart_rate
@@ -1057,27 +1058,29 @@ class HRMPopover:
             return
         if destination is None:
             return
-        try:
+
+        # The export body (temp file, fsync, atomic replace) runs on the
+        # single I/O worker thread; only the destination picker is main-thread
+        # UI.  Success/failure are reported through the same RLock-guarded
+        # state API so the 1 Hz UI tick picks them up.
+        state = self.state
+
+        def _export() -> object:
             if fmt == "json":
-                path = sess_mod.export_session_json(snapshot, destination)
-            else:
-                path = sess_mod.export_session_csv(snapshot, destination)
-        except ValueError as exc:
-            log.info("Session export destination was rejected: %s", exc)
-            self.state.mark_export_failure(str(exc))
-        except OSError:
-            log.exception("Failed to write session %s", fmt.upper())
-            self.state.mark_export_failure(
-                f"Could not write the {fmt.upper()}. Check the destination and try again."
+                return sess_mod.export_session_json(snapshot, destination)
+            return sess_mod.export_session_csv(snapshot, destination)
+
+        def _on_export_success(path: object) -> None:
+            state.mark_export_success(str(path), fmt)
+            NSOperationQueue.mainQueue().addOperationWithBlock_(
+                lambda: self._reveal_in_finder(str(path))
             )
-        except Exception:
-            log.exception("Failed to export session %s", fmt.upper())
-            self.state.mark_export_failure(
-                f"Could not save the session as {fmt.upper()}. Try again."
-            )
-        else:
-            self.state.mark_export_success(str(path), fmt)
-            self._reveal_in_finder(str(path))
+
+        io_worker.submit(
+            _export,
+            on_success=_on_export_success,
+            on_failure=lambda exc: state.mark_export_failure(_export_failure_message(exc, fmt)),
+        )
 
     def _reveal_in_finder(self, path: str) -> None:
         """Reveal the saved export in Finder."""
@@ -1249,6 +1252,20 @@ def macos_save_panel(default_name: str, fmt: str = "csv") -> str | None:
         return None
     url = panel.URL()
     return None if url is None else str(url.path())
+
+
+def _export_failure_message(exc: BaseException, fmt: str) -> str:
+    """Map an export exception to the message shown in the dashboard.
+
+    Mirrors the pre-worker error mapping: user-facing value errors keep their
+    message, write failures get a retry hint, everything else a generic line.
+    """
+
+    if isinstance(exc, ValueError):
+        return str(exc)
+    if isinstance(exc, OSError):
+        return f"Could not write the {fmt.upper()}. Check the destination and try again."
+    return f"Could not save the session as {fmt.upper()}. Try again."
 
 
 def _export_feedback(snapshot: UISnapshot) -> tuple[bool, str | None, bool]:
