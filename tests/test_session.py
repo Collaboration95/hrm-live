@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 import hrm_live.session as session
+from hrm_live import io_worker
 from hrm_live.state import AppState
 
 
@@ -193,6 +194,9 @@ def test_recent_sessions_persist_and_reload(state: AppState, tmp_path: Path) -> 
 
     assert snapshot is not None
     assert state.recent_sessions()[0].session_count == 1
+
+    # Archive writes are queued on the I/O worker; drain it before reading.
+    io_worker.flush()
     assert archive_path.exists()
 
     reloaded = AppState()

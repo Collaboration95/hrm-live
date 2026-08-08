@@ -21,6 +21,7 @@ from AppKit import (
 )
 from Foundation import NSObject
 
+from hrm_live import io_worker
 from hrm_live.ble import BLEManager, stop_ble_background
 from hrm_live.state import AppState
 from hrm_live.ui.popover import HRMPopover
@@ -115,8 +116,6 @@ class HRMBarApp(rumps.App):
             text_part = DISCONNECTED_TITLE
 
         self._set_dual_colour_title(text_part, dot_char, zone_col if s.connected else dot_color)
-
-        log.debug("Menu tick: status=%s", s.connection_status)
 
         # Accessibility
         a11y_label = menu_accessibility_label(
@@ -304,5 +303,7 @@ class HRMBarApp(rumps.App):
         rumps.events.before_start.unregister(self._configure_status_item)
         if manager is not None:
             stop_ble_background(manager)
+        io_worker.flush()
+        io_worker.shutdown()
         if should_quit:
             rumps.quit_application()

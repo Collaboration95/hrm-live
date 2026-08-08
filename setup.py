@@ -33,8 +33,8 @@ OPTIONS = {
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
         "CFBundleIdentifier": "com.hrmlive.app",
-        "CFBundleVersion": "0.9.0",
-        "CFBundleShortVersionString": "0.9.0",
+        # CFBundleVersion / CFBundleShortVersionString are derived from the
+        # installed project metadata by _version_plist() below.
         "NSBluetoothAlwaysUsageDescription": (
             "HRM Live uses Bluetooth to connect to your heart rate "
             "monitor strap and display live BPM data."

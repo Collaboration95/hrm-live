@@ -202,10 +202,15 @@ def test_json_save_uses_json_panel_and_records_archive(tmp_path) -> None:
     popover = HRMPopover(state, save_panel_factory=panel_factory)
     popover._reveal_in_finder = lambda _path: None
 
+    from hrm_live import io_worker
+
+    # The write runs on the I/O worker *after* _save_snapshot returns, so the
+    # export mock must stay patched until the worker drains.
     with patch(
         "hrm_live.ui.popover.sess_mod.export_session_json", return_value=tmp_path / "session.json"
     ):
         popover._save_snapshot(snapshot, fmt="json")
+        io_worker.flush()
 
     assert calls and calls[0][1] == "json"
     record = state.recent_sessions()[0]
@@ -230,11 +235,16 @@ def test_export_os_error_hides_selected_path_from_feedback(tmp_path) -> None:
 
     selected_path = tmp_path / "private-workout.csv"
     popover = HRMPopover(state, save_panel_factory=lambda _default_name: str(selected_path))
+    from hrm_live import io_worker
+
+    # Keep the model patched until the I/O worker drains (the write happens
+    # on the worker thread, after _save_snapshot has already returned).
     with patch(
         "hrm_live.ui.popover.sess_mod.export_session_csv",
         side_effect=OSError(f"Permission denied: {selected_path}"),
     ):
         popover._save_snapshot(snapshot)
+        io_worker.flush()
 
     show_retry, message, is_error = _export_feedback(state.snapshot_for_ui())
     assert (show_retry, message, is_error) == (

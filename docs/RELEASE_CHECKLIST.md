@@ -42,7 +42,7 @@ commit or a differently signed artifact.
 | macOS version and hardware | macOS (Apple Silicon, arm64) |
 | Python version / py2app version | Python 3.14.6 / py2app 0.28+ |
 | Strap model and firmware, if known | ⚠ Not hardware-tested yet |
-| Artifact filename and SHA-256 | `HRM-Live-0.9.0-macos-arm64.zip` — `b114712aae52ca8b50b7201c24338b3ebf6bccd533f22531543b0327376053fa` |
+| Artifact filename and SHA-256 | `HRM-Live-0.9.0-macos-arm64.zip` — SHA-256 left blank until the final Developer ID-signed artifact exists (a re-signed build changes the hash) |
 | GitHub Actions run URL and commit SHA | TBD on CI integration |
 | Developer ID signing identity (name only; never certificate material) | Deferred — ad-hoc only for this release |
 | Notarization submission ID / result | N/A — ad-hoc, not notarized for this release |
@@ -58,7 +58,7 @@ rebuilt and signed through the authorized Developer ID process after this gate.
 | Check | Required result | Result / evidence |
 | --- | --- | --- |
 | `make install` | Dependencies install without unpinned local edits | ✅ Passed |
-| `make check` | Ruff, mypy, 121+ tests, coverage threshold, compileall pass | ✅ 121 passed, 58% coverage (threshold 54%), ruff/mypy/compileall clean |
+| `make check` | Ruff, mypy, 164+ tests, coverage threshold 60%, compileall pass | ✅ 165 passed, 77% coverage (threshold 60%), ruff/mypy/compileall clean |
 | `make package` | Bundle builds, contains `HRMLive.icns`, verifies internal signature and Bluetooth metadata | ✅ **v0.9.0**: `dist/HRM Live.app` built; codesign verify pass; Bluetooth usage strings + LSUIElement=true present |
 | `codesign --verify --deep --strict` on ad-hoc artifact | Passes (ad-hoc) | ✅ Passed |
 | `codesign --verify --deep --strict` on final artifact | Passes after Developer ID signing | |
