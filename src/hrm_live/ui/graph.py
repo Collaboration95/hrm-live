@@ -43,22 +43,7 @@ from hrm_live.zones import get_zone
 log = logging.getLogger(__name__)
 
 # Default zone colors for graph bands
-_ZONE_BAND_COLORS = dict(ZONE_COLORS_DEFAULT)
 _DEFAULT_ZONES = {"z1_max": 0.60, "z2_max": 0.75, "z3_max": 0.88}
-_LEGACY_ZONE_COLORS = {
-    "Z1": "#888888",
-    "Z2": "#4CAF50",
-    "Z3": "#FF9800",
-    "Z4": "#F44336",
-}
-_CHART_ZONE_COLORS_DEFAULT = {
-    # These saturated chart accents follow the visual language of the
-    # reference tracker while keeping the dashboard's semantic tokens intact.
-    "Z1": "#2BC7B7",
-    "Z2": "#F2D33B",
-    "Z3": "#FF8A3D",
-    "Z4": "#ED3C70",
-}
 
 
 def _windowed_readings(
@@ -86,10 +71,19 @@ def summarize_heart_rate(
 
 
 def _resolve_chart_colors(zone_colors: dict[str, str] | None) -> dict[str, str]:
-    """Use vivid chart defaults while preserving explicit user colors."""
-    if not zone_colors or zone_colors in (_ZONE_BAND_COLORS, _LEGACY_ZONE_COLORS):
-        return dict(_CHART_ZONE_COLORS_DEFAULT)
-    return {**_CHART_ZONE_COLORS_DEFAULT, **zone_colors}
+    """Resolve graph zone colors from the dashboard's semantic tokens.
+
+    Uses ``ZONE_COLORS_DEFAULT`` (the single source of truth) as the base and
+    layers any explicit user color on top, so the graph always agrees with the
+    gauge/legend and an explicit choice that happens to equal a default is
+    preserved rather than being silently dropped.
+    """
+
+    colors = dict(ZONE_COLORS_DEFAULT)
+    for zone in ZONE_COLORS_DEFAULT:
+        if zone_colors and zone in zone_colors:
+            colors[zone] = zone_colors[zone]
+    return colors
 
 
 def _chart_color_for_bpm(
@@ -98,9 +92,9 @@ def _chart_color_for_bpm(
     zones: dict[str, float],
     zone_colors: dict[str, str],
 ) -> str:
-    """Resolve the saturated line color for one BPM value."""
+    """Resolve the line color for one BPM value."""
     zone = get_zone(int(round(bpm)), max_hr, zones)
-    return zone_colors.get(zone, _CHART_ZONE_COLORS_DEFAULT["Z1"])
+    return zone_colors.get(zone, ZONE_COLORS_DEFAULT["Z1"])
 
 
 def _format_elapsed_tick(elapsed_seconds: float, span_seconds: float) -> str:

@@ -25,6 +25,11 @@ log = logging.getLogger(__name__)
 ZONE_ZERO: dict[str, float] = {"Z1": 0.0, "Z2": 0.0, "Z3": 0.0, "Z4": 0.0}
 MAX_SESSION_GAP_SECONDS = 5.0
 
+# Largest graph window offered by the UI and the buffer needed to represent it.
+# HR samples arrive at 1 Hz, so 30 minutes requires 30 * 60 = 1800 samples.
+MAX_GRAPH_WINDOW_MINUTES = 30
+RING_BUFFER_CAPACITY = MAX_GRAPH_WINDOW_MINUTES * 60
+
 
 @dataclass(frozen=True)
 class DiscoveredDevice:
@@ -224,7 +229,9 @@ class AppState:
     scan_results: tuple[DiscoveredDevice, ...] = ()
     scan_error: str | None = None
     scan_generation: int = 0
-    ring_buffer: deque[tuple[datetime, int]] = field(default_factory=lambda: deque(maxlen=600))
+    ring_buffer: deque[tuple[datetime, int]] = field(
+        default_factory=lambda: deque(maxlen=RING_BUFFER_CAPACITY)
+    )
     session_active: bool = False
     session_start: datetime | None = None
     session_data: list[SessionSample] = field(default_factory=list)
