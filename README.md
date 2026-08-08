@@ -122,7 +122,7 @@ Default settings:
 - Device address: empty (must be set before BLE will connect)
 - Max HR: 190 bpm
 - Zone boundaries: Z1 < 60%, Z2 < 75%, Z3 < 88%, Z4 ≥ 88%
-- Zone colors: Z1 grey, Z2 green, Z3 orange, Z4 red
+- Zone colors: Z1 grey, Z2 green, Z3 orange, Z4 pink
 
 ## Session Data
 
@@ -171,19 +171,19 @@ src/
     state.py        # Locked AppState and immutable snapshots
     config.py       # Config load/save/validate
     zones.py        # Zone calculation helpers
-    session.py      # Session lifecycle and explicit CSV export
+    session.py      # Session lifecycle and explicit CSV + JSON export
     ble.py          # BLE HR parsing and connection loop
     ui/
       menubar.py    # Status item and shutdown routing
       popover.py    # Dashboard and save-panel orchestration
       graph.py      # HR graph rendering (matplotlib Agg)
       settings.py   # Settings window
+      tokens.py     # Semantic design tokens (colors, type, spacing)
 tests/
   ...
 docs/
   RELEASE_CHECKLIST.md   # Release-candidate sign-off and evidence record
   FEATURE_ROADMAP.md     # Product roadmap and feature milestones
-  ISSUE-*.md             # Plans for in-flight UI/UX issues
 ```
 
 ## Privacy And Limitations
@@ -211,18 +211,9 @@ stored in this repository.
 
 MIT
 
-## Feature Tracking
+## Release Tracking
 
-Release tracker, local implementation state:
-
-1. Dashboard-first status item interaction: implemented in code; manual
-   real-UI verification still pending.
-2. Finder-style CSV saving: implemented and covered by injected-path tests;
-   manual Desktop/spreadsheet verification still pending.
-3. Single guarded quit path: implemented in code; manual real-UI verification
-   still pending for all BLE states.
-4. Native `src/hrm_live` package layout and focused comments: implemented and
-   covered by local quality checks.
-
-This is not a released build until the checklist in
-`docs/RELEASE_CHECKLIST.md` is complete.
+Implementation status and the manual AppKit, hardware, and distribution
+checks for the current release candidate are tracked in
+`docs/RELEASE_CHECKLIST.md`. This is not a released build until that checklist
+is complete.
