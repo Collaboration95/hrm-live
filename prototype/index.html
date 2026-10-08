@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17191d">
+  <meta name="description" content="An interactive design workspace for HRM Live. Explore the dashboard, settings, and simulated workout states without Bluetooth or the macOS app.">
+  <title>HRM Live · UI Lab</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="lab-header">
+    <a class="brand" href="./" aria-label="HRM Live UI Lab home"><span class="brand-mark">♥</span><span>HRM Live <span class="brand-divider">/</span> <strong>UI Lab</strong></span></a>
+    <span class="prototype-badge">Interactive prototype</span>
+    <div class="header-actions"><button id="reset-lab" class="lab-button">Reset workspace</button><button id="export-design" class="lab-button accent">Export design</button></div>
+  </header>
+  <div class="workspace">
+    <aside class="left-panel">
+      <section class="panel-section"><h2>Views</h2><nav id="view-nav" class="view-nav" aria-label="Preview views"><button data-view="both" aria-pressed="true">◫ <span>All screens</span></button><button data-view="dashboard" aria-pressed="false">◉ <span>Dashboard</span></button><button data-view="settings" aria-pressed="false">⚙ <span>Settings</span></button></nav></section>
+      <section class="panel-section"><div class="section-heading"><h2>Scenarios</h2><span class="count">10</span></div><div id="scenarios" class="scenario-list"></div></section>
+      <section class="panel-section signal-section"><div class="section-heading"><h2>Signal simulator</h2><span id="signal-status" class="tiny-status">Paused</span></div>
+        <label class="lab-label" for="profile">Workout profile</label><select id="profile"><option value="steady">Steady effort</option><option value="warmup">Warm-up</option><option value="intervals">Intervals</option><option value="recovery">Recovery</option><option value="manual">Manual BPM</option></select>
+        <div class="bpm-control"><label for="bpm-slider">Heart rate</label><output id="bpm-output">142 <small>bpm</small></output></div><input id="bpm-slider" type="range" min="40" max="220" value="142">
+        <div class="simulation-actions"><button id="toggle-signal" class="lab-button accent">▶ Play signal</button><button id="step-signal" class="lab-button" title="Advance one simulated second">Step</button></div>
+        <label class="lab-label" for="speed">Playback speed</label><select id="speed"><option value="1">1× · real time</option><option value="5">5×</option><option value="30">30×</option></select>
+        <label class="check-row"><input type="checkbox" id="fail-export"> Simulate export failure</label>
+      </section>
+      <footer class="panel-note">Synthetic data only.<br>App settings and Bluetooth stay untouched.</footer>
+    </aside>
+    <main class="canvas-area">
+      <div class="canvas-toolbar"><div><span class="canvas-title">Preview canvas</span><span id="scenario-caption" class="canvas-caption">Connected · Aerobic</span></div><div class="canvas-tools"><label for="zoom" class="sr-only">Preview zoom</label><select id="zoom"><option value="0.75">75%</option><option value="1" selected>100%</option><option value="1.25">125%</option><option value="1.5">150%</option></select><button id="appearance" class="lab-button" aria-pressed="false">☾ Dark appearance</button></div></div>
+      <div class="canvas-scroll"><div id="preview-board" class="preview-board">
+        <section id="dashboard-frame" class="artboard"><div class="frame-label"><span>01 / Dashboard</span><span id="dashboard-dimensions">344 px</span></div><div class="menu-preview"><span class="menu-apple">●</span><span>Finder</span><span class="menu-spacer"></span><button id="menu-title" title="Toggle dashboard">♥ 142 bpm ●</button><span>09:41</span></div><article id="dashboard" class="dashboard" aria-label="HRM Live dashboard preview"></article><div id="quit-overlay" class="quit-overlay" hidden><span class="brand-mark">♥</span><h2>HRM Live has quit</h2><button id="relaunch" class="native-button primary">Relaunch preview</button></div></section>
+        <section id="settings-frame" class="artboard"><div class="frame-label"><span>02 / Settings</span><span>440 px</span></div><article class="settings-window" aria-label="HRM Live settings preview"><div class="window-titlebar"><div class="traffic-lights"><button id="close-settings" title="Close settings" class="traffic close"></button><span class="traffic minimize"></span><span class="traffic maximize"></span></div><strong>HRM Live Settings</strong><span class="titlebar-spacer"></span></div><form id="settings-form"><div id="settings-content" class="settings-content"></div><footer class="settings-footer"><button type="button" id="reset-settings" class="native-button">Reset defaults</button><div><button type="button" id="cancel-settings" class="native-button">Cancel</button><button type="submit" id="save-settings" class="native-button primary">Save changes</button></div></footer></form></article></section>
+      </div></div>
+      <footer class="canvas-footer"><span><span class="footer-dot"></span> Browser simulation · no native app required</span><span>Space to play / pause · R to reset</span></footer>
+    </main>
+    <aside class="right-panel"><section class="panel-section"><div class="section-heading"><h2>Design</h2><span class="tiny-status">Live edits</span></div><label class="lab-label" for="frame-width">Dashboard width <output id="width-output">344 px</output></label><input id="frame-width" type="range" min="320" max="420" step="8" value="344"><label class="lab-label" for="card-radius">Card radius <output id="radius-output">8 px</output></label><input id="card-radius" type="range" min="0" max="24" value="8"><label class="lab-label" for="section-gap">Section gap <output id="gap-output">16 px</output></label><input id="section-gap" type="range" min="8" max="32" step="4" value="16"><div id="design-colors" class="design-colors"></div><label class="check-row"><input id="show-bounds" type="checkbox"> Show component bounds</label><label class="check-row"><input id="reduce-motion" type="checkbox"> Reduce motion</label><button id="reset-design" class="lab-button full">Restore native tokens</button></section>
+      <section class="panel-section"><h2>State inspector</h2><dl id="state-inspector" class="inspector"></dl></section>
+      <section class="panel-section"><h2>Activity</h2><ol id="activity" class="activity"></ol></section>
+      <footer class="panel-note">Web controls approximate AppKit.<br>Design edits affect this preview; export them for implementation.</footer>
+    </aside>
+  </div>
+  <dialog id="export-dialog"><form method="dialog" class="dialog-body"><div class="dialog-icon">↥</div><h2>Save your session</h2><p id="export-summary"></p><label for="export-format">File format</label><select id="export-format"><option value="csv">CSV · sample data</option><option value="json">JSON · summary + samples</option></select><label for="export-name">Filename</label><input id="export-name" value="HRM Live demo session"><div class="dialog-actions"><button value="cancel" class="native-button">Cancel</button><button id="download-session" type="button" class="native-button primary">Save session</button></div></form></dialog>
+  <dialog id="confirm-dialog"><form method="dialog" class="dialog-body"><h2 id="confirm-title"></h2><p id="confirm-copy"></p><div class="dialog-actions"><button value="cancel" class="native-button">Cancel</button><button value="confirm" class="native-button primary">Continue</button></div></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
