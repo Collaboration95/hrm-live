@@ -45,14 +45,19 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+filterwarnings = [
+    # PyObjC emits this when layer CGColor pointers are converted; benign.
+    "ignore:PyObjCPointer created:objc.ObjCPointerWarning",
+]
 
 [tool.coverage.run]
 branch = true
 source = ["hrm_live"]
 omit = [
+    # Entry-point wrapper only: python -m hrm_live just calls app.main() after
+    # setting dont_write_bytecode; the import path is exercised by
+    # tests/test_imports.py, and running it would launch a blocking GUI app.
     "*/hrm_live/__main__.py",
-    "*/hrm_live/app.py",
-    "*/hrm_live/ui/*",
 ]
 
 [tool.coverage.report]

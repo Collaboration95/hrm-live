@@ -112,7 +112,8 @@ With coverage:
 make coverage
 ```
 
-The current coverage gate is 60%, with the suite measuring ~76% locally (164 tests).
+The current coverage gate is 60%, with the suite measuring ~73% project-wide
+(263 tests), including the UI modules and the composition root.
 
 ## Configuration
 
