@@ -11,7 +11,8 @@ with a zone gauge, HR graph, and session recording.
   graph, session stats, and start/stop controls
 - **BLE HRM support** for standard GATT Heart Rate Measurement (0x2A37)
 - **4-zone model** with configurable boundaries and colors
-- **Session recording** with user-selected CSV export
+- **Session recording** with user-selected CSV and JSON export
+- **Saved session history** for reopening recent sessions and exported files
 - **Configurable settings** (max HR, zone boundaries, colors, graph window)
 
 ## Requirements
@@ -111,8 +112,8 @@ With coverage:
 make coverage
 ```
 
-The current initial coverage gate is 54%, measured after adding AppKit-safe
-unit tests and before deeper UI automation.
+The current coverage gate is 60%, with the suite measuring ~73% project-wide
+(263 tests), including the UI modules and the composition root.
 
 ## Configuration
 
@@ -122,24 +123,43 @@ Default settings:
 - Device address: empty (must be set before BLE will connect)
 - Max HR: 190 bpm
 - Zone boundaries: Z1 < 60%, Z2 < 75%, Z3 < 88%, Z4 ≥ 88%
-- Zone colors: Z1 grey, Z2 green, Z3 orange, Z4 red
+- Zone colors: Z1 grey, Z2 green, Z3 orange, Z4 pink
 
 ## Session Data
 
-Stopping a non-empty session opens a Finder save dialog. No CSV is written
-until you choose a destination. Cancelling keeps the completed session in
-memory and exposes `Save Last Session...` until a new session starts.
+Stopping a non-empty session opens a Finder save dialog. No CSV or JSON is
+written until you choose a destination. Cancelling keeps the completed session
+in local history and exposes `Save Last Session...` until a new session starts.
+
+Completed sessions stay available in the recent-session history, so you can
+reopen a prior summary, reveal an existing export in Finder, and retry a
+failed save without re-recording the workout.
 
 Session duration is based on timestamp deltas between valid heart-rate
 samples, assigned to the previous sample's zone. A single notification gap is
 clamped to 5 seconds so disconnects or sleep do not create inflated workout
 durations. The first sample adds zero seconds.
 
+JSON export includes the zone-transition count plus app and export schema
+versions alongside the recorded samples.
+
 Format:
 ```csv
 timestamp,bpm,zone
 2025-08-10T07:34:12,142,Z3
 ```
+
+## GitHub Workflow
+
+The repository uses GitHub-native labels and a small milestone set.
+
+- Issue labels: `bug`, `enhancement`, `documentation`, `dependencies`,
+  `good first issue`, `help wanted`
+- PR size labels: `size: xs`, `size: s`, `size: m`, `size: l`, `size: xl`
+- Milestone: `v1.6 — Session Confidence`
+
+Pull requests should link the tracking issue and include screenshots for UI
+changes.
 
 ## Project Structure
 
@@ -152,20 +172,19 @@ src/
     state.py        # Locked AppState and immutable snapshots
     config.py       # Config load/save/validate
     zones.py        # Zone calculation helpers
-    session.py      # Session lifecycle and explicit CSV export
+    session.py      # Session lifecycle and explicit CSV + JSON export
     ble.py          # BLE HR parsing and connection loop
     ui/
       menubar.py    # Status item and shutdown routing
       popover.py    # Dashboard and save-panel orchestration
       graph.py      # HR graph rendering (matplotlib Agg)
       settings.py   # Settings window
+      tokens.py     # Semantic design tokens (colors, type, spacing)
 tests/
   ...
 docs/
-  IMPLEMENTATION_NOTES.md              # Historical coding-agent handoff evidence
-  RELEASE_CHECKLIST.md                 # Release-candidate sign-off record
-  RELEASE_IMPLEMENTATION_HANDOFF.md
-  RELEASE_READINESS_AUDIT_2026-07-15.md  # Current independent release status
+  RELEASE_CHECKLIST.md   # Release-candidate sign-off and evidence record
+  FEATURE_ROADMAP.md     # Product roadmap and feature milestones
 ```
 
 ## Privacy And Limitations
@@ -193,18 +212,9 @@ stored in this repository.
 
 MIT
 
-## Feature Tracking
+## Release Tracking
 
-Release tracker, local implementation state:
-
-1. Dashboard-first status item interaction: implemented in code; manual
-   real-UI verification still pending.
-2. Finder-style CSV saving: implemented and covered by injected-path tests;
-   manual Desktop/spreadsheet verification still pending.
-3. Single guarded quit path: implemented in code; manual real-UI verification
-   still pending for all BLE states.
-4. Native `src/hrm_live` package layout and focused comments: implemented and
-   covered by local quality checks.
-
-This is not a released build until the checklist in
-`docs/RELEASE_CHECKLIST.md` is complete.
+Implementation status and the manual AppKit, hardware, and distribution
+checks for the current release candidate are tracked in
+`docs/RELEASE_CHECKLIST.md`. This is not a released build until that checklist
+is complete.

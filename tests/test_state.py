@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from threading import Thread
 
-from hrm_live.state import AppState, DiscoveredDevice
+from hrm_live.state import RING_BUFFER_CAPACITY, AppState, DiscoveredDevice
 
 
 def test_default_initialization() -> None:
@@ -17,7 +17,7 @@ def test_default_initialization() -> None:
     assert s.scan_error is None
     assert s.scan_generation == 0
     assert len(s.ring_buffer) == 0
-    assert s.ring_buffer.maxlen == 600
+    assert s.ring_buffer.maxlen == RING_BUFFER_CAPACITY
     assert s.session_active is False
     assert s.session_start is None
     assert s.session_data == []
@@ -33,15 +33,16 @@ def test_default_initialization() -> None:
 
 def test_ring_buffer_maxlen() -> None:
     s = AppState()
-    assert s.ring_buffer.maxlen == 600
+    assert RING_BUFFER_CAPACITY == 1800
+    assert s.ring_buffer.maxlen == RING_BUFFER_CAPACITY
 
 
 def test_ring_buffer_overflow() -> None:
     s = AppState()
-    for i in range(700):
+    for i in range(2 * RING_BUFFER_CAPACITY):
         s.record_bpm(datetime.now(UTC), 100 + (i % 50))
     snapshot = s.snapshot_for_ui()
-    assert len(snapshot.ring_buffer) == 600
+    assert len(snapshot.ring_buffer) == RING_BUFFER_CAPACITY
 
 
 def test_discovered_device_is_frozen() -> None:
@@ -78,4 +79,4 @@ def test_fast_producer_and_snapshots_do_not_mutate_during_iteration() -> None:
     producer.join(timeout=2)
 
     assert not producer.is_alive()
-    assert len(s.snapshot_for_ui().ring_buffer) <= 600
+    assert len(s.snapshot_for_ui().ring_buffer) <= RING_BUFFER_CAPACITY

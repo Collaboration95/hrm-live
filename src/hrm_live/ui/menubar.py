@@ -13,14 +13,15 @@ import threading
 import objc
 import rumps
 from AppKit import (
-    NSAttributedString,
     NSColor,
     NSFont,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
+    NSMutableAttributedString,
 )
 from Foundation import NSObject
 
+from hrm_live import io_worker
 from hrm_live.ble import BLEManager, stop_ble_background
 from hrm_live.state import AppState
 from hrm_live.ui.popover import HRMPopover
@@ -116,8 +117,6 @@ class HRMBarApp(rumps.App):
 
         self._set_dual_colour_title(text_part, dot_char, zone_col if s.connected else dot_color)
 
-        log.debug("Menu tick: status=%s", s.connection_status)
-
         # Accessibility
         a11y_label = menu_accessibility_label(
             s.latest_bpm if s.connected else None,
@@ -183,7 +182,12 @@ class HRMBarApp(rumps.App):
                 NSFontAttributeName: NSFont.menuBarFontOfSize_(0),
             }
 
-            attributed = NSAttributedString.alloc().initWithString_attributes_(full, text_attrs)
+            # ``NSAttributedString`` is immutable.  This title needs a
+            # differently coloured trailing status dot, so use its mutable
+            # counterpart before assigning it to the status-bar button.
+            attributed = NSMutableAttributedString.alloc().initWithString_attributes_(
+                full, text_attrs
+            )
             # Apply dot colour to the last character (the dot)
             dot_range = (len(full) - 1, 1)
             attributed.addAttributes_range_(dot_attrs, dot_range)
@@ -299,5 +303,7 @@ class HRMBarApp(rumps.App):
         rumps.events.before_start.unregister(self._configure_status_item)
         if manager is not None:
             stop_ble_background(manager)
+        io_worker.flush()
+        io_worker.shutdown()
         if should_quit:
             rumps.quit_application()

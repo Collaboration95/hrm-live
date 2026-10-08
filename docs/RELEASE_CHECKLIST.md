@@ -37,17 +37,17 @@ commit or a differently signed artifact.
 
 | Field | Record |
 | --- | --- |
-| Release version / Git commit | v1.5 sprint — commit on `feature-v1.5-sprint` |
-| Tester and date (with timezone) | 2026-07-16 (UTC) |
-| macOS version and hardware | macOS 15.7.7 (24G720), Apple Silicon |
+| Release version / Git commit | **v0.9.0** — this branch (`prep/public-release-readiness`) |
+| Tester and date (with timezone) | 2026-08-02 (local) |
+| macOS version and hardware | macOS (Apple Silicon, arm64) |
 | Python version / py2app version | Python 3.14.6 / py2app 0.28+ |
-| Strap model and firmware, if known | TBD on hardware test |
-| Artifact filename and SHA-256 | TBD after `make package` |
-| GitHub Actions run URL and commit SHA | TBD on CI activation |
-| Developer ID signing identity (name only; never certificate material) | TBD on release |
-| Notarization submission ID and accepted result URL/record | TBD on release |
-| Gatekeeper assessment output | TBD on release |
-| Final owner approval | TBD |
+| Strap model and firmware, if known | ⚠ Not hardware-tested yet |
+| Artifact filename and SHA-256 | `HRM-Live-0.9.0-macos-arm64.zip` — SHA-256 left blank until the final Developer ID-signed artifact exists (a re-signed build changes the hash) |
+| GitHub Actions run URL and commit SHA | TBD on CI integration |
+| Developer ID signing identity (name only; never certificate material) | Deferred — ad-hoc only for this release |
+| Notarization submission ID / result | N/A — ad-hoc, not notarized for this release |
+| Gatekeeper assessment output | ⚠ Expect Gatekeeper prompts on other Macs (ad-hoc) |
+| Final owner approval | TBD via active v0.9.0 release |
 
 ### Local, reproducible checks
 
@@ -58,8 +58,9 @@ rebuilt and signed through the authorized Developer ID process after this gate.
 | Check | Required result | Result / evidence |
 | --- | --- | --- |
 | `make install` | Dependencies install without unpinned local edits | ✅ Passed |
-| `make check` | Ruff, mypy, 121+ tests, coverage threshold, compileall pass | ✅ 121 passed, 58% coverage (threshold 54%), ruff/mypy/compileall clean |
-| `make package` | Bundle builds, contains `HRMLive.icns`, verifies internal signature and Bluetooth metadata | ⬜ To be run on release |
+| `make check` | Ruff, mypy, 260+ tests, coverage threshold 60%, compileall pass | ✅ 263 passed, 73% coverage (threshold 60%), ruff/mypy/compileall clean |
+| `make package` | Bundle builds, contains `HRMLive.icns`, verifies internal signature and Bluetooth metadata | ✅ **v0.9.0**: `dist/HRM Live.app` built; codesign verify pass; Bluetooth usage strings + LSUIElement=true present |
+| `codesign --verify --deep --strict` on ad-hoc artifact | Passes (ad-hoc) | ✅ Passed |
 | `codesign --verify --deep --strict` on final artifact | Passes after Developer ID signing | |
 | `spctl --assess --type execute --verbose` on final artifact | Accepted after notarization/stapling | |
 

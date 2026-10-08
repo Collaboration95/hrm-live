@@ -82,10 +82,10 @@ def test_zone_negative_bpm() -> None:
 
 
 def test_zone_color_default() -> None:
-    assert zone_color("Z1") == "#888888"
-    assert zone_color("Z2") == "#4CAF50"
-    assert zone_color("Z3") == "#FF9800"
-    assert zone_color("Z4") == "#F44336"
+    assert zone_color("Z1") == "#8E8E93"
+    assert zone_color("Z2") == "#34C759"
+    assert zone_color("Z3") == "#FF9F0A"
+    assert zone_color("Z4") == "#FF375F"
 
 
 def test_zone_color_custom() -> None:
@@ -95,11 +95,11 @@ def test_zone_color_custom() -> None:
 
 
 def test_zone_color_unknown_zone() -> None:
-    assert zone_color("Z5") == "#888888"  # falls back to Z1 default
+    assert zone_color("Z5") == "#8E8E93"  # falls back to Z1 default
 
 
 def test_zone_color_none_colors() -> None:
-    assert zone_color("Z1", None) == "#888888"
+    assert zone_color("Z1", None) == "#8E8E93"
 
 
 # ── Zone labels ─────────────────────────────────────────────────────────

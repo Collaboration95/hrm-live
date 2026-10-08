@@ -12,26 +12,29 @@ native controls; these tokens apply to custom-drawn dashboard surfaces.
 
 from __future__ import annotations
 
-# ── Dashboard surface palette (warm near-black) ──────────────────────────
+# ── Dashboard surface palette (vibrant light instrument UI) ──────────────
 
-CANVAS = "#1A1A1A"  # Root popover background
-SURFACE = "#242424"  # Card / section backgrounds
-SURFACE_ALT = "#2E2E2E"  # Secondary surfaces (graph bg, hover)
-DIVIDER = "#3A3A3A"  # Light separators on dark surface
+# These values mirror the attached macOS profiler references: a clean white
+# canvas, quiet neutral cards, and saturated system accents that remain clear
+# at the narrow menu-bar popover size.
+CANVAS = "#FFFFFF"  # Root popover background
+SURFACE = "#F5F5F7"  # Card / section backgrounds
+SURFACE_ALT = "#E5E5EA"  # Secondary surfaces (graph bg, hover, tracks)
+DIVIDER = "#D1D1D6"  # Light separators on light surfaces
 
 # ── Text colours ─────────────────────────────────────────────────────────
 
-TEXT_PRIMARY = "#FFFFFF"  # Hero BPM, primary labels
-TEXT_SECONDARY = "#AAAAAA"  # Captions, secondary stats
-TEXT_TERTIARY = "#777777"  # Placeholder, disabled
-TEXT_ACCENT = "#4FC3F7"  # Graph line, interactive accent
+TEXT_PRIMARY = "#1D1D1F"  # Hero BPM, primary labels
+TEXT_SECONDARY = "#6E6E73"  # Captions, secondary stats
+TEXT_TERTIARY = "#8E8E93"  # Placeholder, disabled
+TEXT_ACCENT = "#0A84FF"  # Graph line, interactive accent
 
 # ── Semantic state colours ───────────────────────────────────────────────
 
-STATUS_CONNECTED = "#4CAF50"  # Green — connected dot
-STATUS_RECONNECTING = "#FF9800"  # Orange — reconnecting dot
-STATUS_DISCONNECTED = "#888888"  # Grey — disconnected dot
-STATUS_ERROR = "#F44336"  # Red — error dot
+STATUS_CONNECTED = "#34C759"  # Green — connected dot
+STATUS_RECONNECTING = "#FF9F0A"  # Orange — reconnecting dot
+STATUS_DISCONNECTED = "#8E8E93"  # Grey — disconnected dot
+STATUS_ERROR = "#FF3B30"  # Red — error dot
 
 # ── Typography scale (point sizes) ───────────────────────────────────────
 
@@ -61,10 +64,10 @@ HIT_TARGET_MIN = 36  # Minimum interactive hit area
 # ── Zone accent colours (defaults, overridden by user config) ────────────
 
 ZONE_COLORS_DEFAULT: dict[str, str] = {
-    "Z1": "#888888",
-    "Z2": "#4CAF50",
-    "Z3": "#FF9800",
-    "Z4": "#F44336",
+    "Z1": "#8E8E93",
+    "Z2": "#34C759",
+    "Z3": "#FF9F0A",
+    "Z4": "#FF375F",
 }
 
 # ── Contrast ratio targets ───────────────────────────────────────────────
@@ -91,7 +94,7 @@ def zone_accent(zone: str, colors_cfg: dict[str, str] | None = None) -> str:
     """Return zone accent colour from config, falling back to defaults."""
     if colors_cfg and zone in colors_cfg:
         return colors_cfg[zone]
-    return ZONE_COLORS_DEFAULT.get(zone, "#888888")
+    return ZONE_COLORS_DEFAULT.get(zone, STATUS_DISCONNECTED)
 
 
 def menu_title(bpm: int | None, connection_status: str) -> str:

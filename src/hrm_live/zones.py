@@ -17,6 +17,8 @@ Boundary semantics:
 
 from __future__ import annotations
 
+from hrm_live.ui.tokens import ZONE_COLORS_DEFAULT
+
 # ── Zone constants ───────────────────────────────────────────────────────
 
 ZONE_LABELS: dict[str, str] = {
@@ -26,12 +28,7 @@ ZONE_LABELS: dict[str, str] = {
     "Z4": "VO2 Max",
 }
 
-DEFAULT_COLORS: dict[str, str] = {
-    "Z1": "#888888",
-    "Z2": "#4CAF50",
-    "Z3": "#FF9800",
-    "Z4": "#F44336",
-}
+DEFAULT_COLORS: dict[str, str] = dict(ZONE_COLORS_DEFAULT)
 
 ZONE_ORDER = ["Z1", "Z2", "Z3", "Z4"]
 
@@ -73,7 +70,7 @@ def zone_color(zone: str, colors: dict[str, str] | None = None) -> str:
     """
     if colors is None:
         colors = DEFAULT_COLORS
-    return colors.get(zone, DEFAULT_COLORS.get(zone, "#888888"))
+    return colors.get(zone, DEFAULT_COLORS.get(zone, ZONE_COLORS_DEFAULT["Z1"]))
 
 
 def zone_label(zone: str) -> str:

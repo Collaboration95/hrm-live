@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import sys
 
 import hrm_live.config as cfg_mod
@@ -71,8 +72,16 @@ def _shutdown_app() -> None:
 
 
 def _setup_logging() -> None:
+    """Configure stderr logging.
+
+    Default level is INFO; set HRM_LIVE_LOG_LEVEL (e.g. DEBUG) to raise it.
+    DEBUG stays off by default so per-tick diagnostics do not spam logs.
+    """
+
+    requested = os.environ.get("HRM_LIVE_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, requested, logging.INFO)
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )

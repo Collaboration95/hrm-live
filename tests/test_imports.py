@@ -71,25 +71,20 @@ def test_import_popover() -> None:
     import hrm_live.ui.popover as popover
 
     assert popover.POPOVER_WIDTH > 0
+    assert popover.POPOVER_PREFERRED_EDGE == 1  # NSRectEdgeMinY: directly below the widget
 
 
-def test_dark_button_title_helper_sets_accessible_white_titles() -> None:
-    """Popover helper keeps dark buttons readable."""
-    from AppKit import NSForegroundColorAttributeName
-
+def test_dark_button_title_helper_leaves_native_contrast_to_appkit() -> None:
+    """Popover helper preserves native button contrast and accessibility."""
     from hrm_live.ui.popover import _set_dark_button_title
 
     class FakeButton:
         def __init__(self) -> None:
             self.title_value = ""
             self.accessibility_value = ""
-            self.attributed = None
 
         def setTitle_(self, value: str) -> None:
             self.title_value = value
-
-        def setAttributedTitle_(self, value) -> None:
-            self.attributed = value
 
         def setAccessibilityLabel_(self, value: str) -> None:
             self.accessibility_value = value
@@ -99,24 +94,35 @@ def test_dark_button_title_helper_sets_accessible_white_titles() -> None:
 
     assert button.title_value == "⚙ Settings"
     assert button.accessibility_value == "⚙ Settings"
-    attributed = button.attributed
-    assert attributed.string() == "⚙ Settings"
-    color = attributed.attributesAtIndex_effectiveRange_(0, None)[0].get(
-        NSForegroundColorAttributeName
-    )
-    assert color is not None
 
 
-def test_popover_view_builds_without_appkit_abort() -> None:
-    """Headless popover content avoids controls that require NSApplication."""
+def test_popover_exposes_native_dashboard_controller() -> None:
+    """The dashboard controller can be imported before macOS starts NSApp."""
+    from hrm_live.ui.popover import HRMPopover, _make_dashboard_button
+
+    assert HRMPopover is not None
+    assert _make_dashboard_button is not None
+
+
+def test_settings_action_closes_popover_then_opens_settings() -> None:
+    """The transient dashboard must not keep the Settings panel hidden."""
     from hrm_live.state import AppState
     from hrm_live.ui.popover import HRMPopover
 
-    popover = HRMPopover(AppState())
-    view = popover._build_view()
+    events: list[tuple[str, object]] = []
 
-    assert view is not None
-    assert len(view.subviews()) > 0
+    class FakePopover:
+        def performClose_(self, sender: object) -> None:
+            events.append(("close", sender))
+
+    popover = HRMPopover(AppState())
+    popover._popover = FakePopover()  # type: ignore[assignment]
+    popover.on_settings = lambda: events.append(("settings", None))
+    sender = object()
+
+    popover.open_settings_(sender)
+
+    assert events == [("close", sender), ("settings", None)]
 
 
 def test_popover_duration_formats_clamped_zone_seconds() -> None:
@@ -196,10 +202,15 @@ def test_json_save_uses_json_panel_and_records_archive(tmp_path) -> None:
     popover = HRMPopover(state, save_panel_factory=panel_factory)
     popover._reveal_in_finder = lambda _path: None
 
+    from hrm_live import io_worker
+
+    # The write runs on the I/O worker *after* _save_snapshot returns, so the
+    # export mock must stay patched until the worker drains.
     with patch(
         "hrm_live.ui.popover.sess_mod.export_session_json", return_value=tmp_path / "session.json"
     ):
         popover._save_snapshot(snapshot, fmt="json")
+        io_worker.flush()
 
     assert calls and calls[0][1] == "json"
     record = state.recent_sessions()[0]
@@ -224,11 +235,16 @@ def test_export_os_error_hides_selected_path_from_feedback(tmp_path) -> None:
 
     selected_path = tmp_path / "private-workout.csv"
     popover = HRMPopover(state, save_panel_factory=lambda _default_name: str(selected_path))
+    from hrm_live import io_worker
+
+    # Keep the model patched until the I/O worker drains (the write happens
+    # on the worker thread, after _save_snapshot has already returned).
     with patch(
         "hrm_live.ui.popover.sess_mod.export_session_csv",
         side_effect=OSError(f"Permission denied: {selected_path}"),
     ):
         popover._save_snapshot(snapshot)
+        io_worker.flush()
 
     show_retry, message, is_error = _export_feedback(state.snapshot_for_ui())
     assert (show_retry, message, is_error) == (
@@ -299,6 +315,55 @@ def test_settings_panel_headless_guard() -> None:
 
     with pytest.raises(RuntimeError, match="NSApplication"):
         SettingsWindow(AppState())._build_panel()
+
+
+def test_settings_panel_is_activatable() -> None:
+    """Settings must be a normal key window after the popover closes."""
+    from AppKit import NSWindowStyleMaskNonactivatingPanel
+
+    from hrm_live.ui.settings import SETTINGS_PANEL_STYLE_MASK
+
+    assert SETTINGS_PANEL_STYLE_MASK & NSWindowStyleMaskNonactivatingPanel == 0
+
+
+def test_settings_show_raises_existing_panel() -> None:
+    """Repeated Settings clicks reuse and raise the existing panel."""
+    from hrm_live.state import AppState
+    from hrm_live.ui.settings import SettingsWindow
+
+    class FakeApp:
+        def activateIgnoringOtherApps_(self, value: bool) -> None:
+            assert value is True
+
+    class FakePanel:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def isVisible(self) -> bool:
+            return True
+
+        def makeKeyAndOrderFront_(self, sender: object) -> None:
+            self.calls.append("make-key")
+
+        def orderFrontRegardless(self) -> None:
+            self.calls.append("order-regardless")
+
+    window = SettingsWindow(AppState())
+    panel = FakePanel()
+    window._panel = panel  # type: ignore[assignment]
+
+    with patch("hrm_live.ui.settings.NSApp", return_value=FakeApp()):
+        window.show()
+
+    assert panel.calls == ["make-key", "order-regardless"]
+
+
+def test_settings_rect_helper_returns_appkit_nsrect() -> None:
+    """Flat settings frames are normalized before entering PyObjC APIs."""
+    from hrm_live.ui.settings import _rect
+
+    assert _rect((10, 20, 30, 40)) == ((10, 20), (30, 40))
+    assert _rect(((10, 20), (30, 40))) == ((10, 20), (30, 40))
 
 
 def test_settings_scan_callbacks_use_injected_functions() -> None:
