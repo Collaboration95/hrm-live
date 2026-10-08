@@ -115,6 +115,14 @@ make coverage
 The current coverage gate is 60%, with the suite measuring ~73% project-wide
 (263 tests), including the UI modules and the composition root.
 
+## Interactive UI prototyping
+
+Run `make prototype` and open **http://127.0.0.1:8765** for the browser UI lab.
+Explore dashboard/settings flows with synthetic readings, switch connection and
+session scenarios, and edit colors, spacing and frame width without launching
+the macOS app. No Bluetooth device or npm dependencies are needed. See
+[`prototype/README.md`](prototype/README.md) for controls and verification.
+
 ## Configuration
 
 Config file: `~/.config/hrm/config.json`

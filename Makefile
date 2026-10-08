@@ -3,8 +3,11 @@ PIP ?= .venv/bin/pip
 MPLCONFIGDIR ?= /tmp/hrm-live-matplotlib
 APP_BUNDLE := dist/HRM Live.app
 COMPILE_PATHS := src tests scripts setup.py
+PROTOTYPE_PORT ?= 8765
+PROTOTYPE_PYTHON ?= python3
+NODE ?= node
 
-.PHONY: help venv install install-hooks run format format-check lint typecheck test test-verbose coverage compile check icon build verify-bundle package clean
+.PHONY: help venv install install-hooks run prototype prototype-check format format-check lint typecheck test test-verbose coverage compile check icon build verify-bundle package clean
 
 help:
 	@printf "HRM Live development targets:\n"
@@ -12,6 +15,8 @@ help:
 	@printf "  make install        Install app and dev dependencies into .venv\n"
 	@printf "  make install-hooks  Install repo-local git hooks\n"
 	@printf "  make run            Run the menu bar app in dev mode\n"
+	@printf "  make prototype      Open the HTML UI lab server (localhost:8765)\n"
+	@printf "  make prototype-check Check browser simulation syntax and behavior\n"
 	@printf "  make format-check   Check formatting with Ruff\n"
 	@printf "  make lint           Run Ruff lint\n"
 	@printf "  make typecheck      Run mypy\n"
@@ -37,6 +42,15 @@ install-hooks:
 
 run:
 	$(PYTHON) -m hrm_live
+
+prototype:
+	$(PROTOTYPE_PYTHON) scripts/export_ui_tokens.py
+	$(PROTOTYPE_PYTHON) -m http.server $(PROTOTYPE_PORT) --bind 127.0.0.1 --directory prototype
+
+prototype-check:
+	$(NODE) --check prototype/app.js
+	$(NODE) --check prototype/model.js
+	$(NODE) --test prototype/model.test.js
 
 format:
 	$(PYTHON) -m ruff format src tests scripts setup.py

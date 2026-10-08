@@ -1,0 +1,6 @@
+{
+  "name": "hrm-live-ui-lab",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test model.test.js", "check": "node --check app.js && node --check model.js && node --test model.test.js" }
+}
